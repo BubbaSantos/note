@@ -556,6 +556,32 @@ function paintFmt() {
 }
 const paintSoon = () => { paintFmt(); setTimeout(paintFmt, 60); };
 document.addEventListener('selectionchange', paintFmt);
+// Safety net for browsers that let typed text inherit the neighbouring format: after each typed character,
+// make its bold/italic/strike match the buttons (does nothing when the browser already got it right).
+edEl().addEventListener('input', e => {
+  if (e.inputType !== 'insertText' || !e.data) return;
+  const sel = getSelection(), n = e.data.length;
+  if (!sel.rangeCount || !sel.isCollapsed) return;
+  const at = { node: sel.anchorNode, off: sel.anchorOffset };
+  // next tick: browsers refuse editing commands from inside an input event
+  setTimeout(() => {
+    const s = getSelection();
+    if (!s.rangeCount || !s.isCollapsed || s.anchorNode !== at.node || s.anchorOffset !== at.off) return;   // cursor moved on
+    const inHeading = !!closest(/^H[1-6]$/);
+    for (const name of Object.keys(INLINE)) {
+      if (inHeading && name === 'bold') continue;   // headings are bold by themselves
+      const node = s.anchorNode, off = s.anchorOffset;
+      if (!node || node.nodeType !== 3 || off < n) return;
+      if (!!closest(INLINE[name][1]) === pendOn(name)) continue;
+      const r = document.createRange(); r.setStart(node, off - n); r.setEnd(node, off);
+      s.removeAllRanges(); s.addRange(r);
+      document.execCommand(INLINE[name][0]);   // toggles just the typed characters
+      s.collapseToEnd();
+      const k = caretKey();
+      if (pend && k) { pend.node = k.node; pend.off = k.off; }   // keep a lit toggle attached to the new cursor spot
+    }
+  }, 0);
+});
 edEl().addEventListener('input', () => {
   if (!pend) return;
   const k = caretKey();
