@@ -682,8 +682,11 @@ function deleteCurrent() {
   });
 }
 function removeNote(id, quiet) {
+  const cur = getNote(id);
   notes = notes.filter(n => n.id !== id);
-  if (id in synced || !quiet) deleted[id] = now();   // tombstone so the delete reaches the other devices
+  // tombstone so the delete reaches the other devices; strictly newer than the note's last edit, or a delete in the
+  // same second as an upload wouldn't sync
+  if (id in synced || !quiet) deleted[id] = Math.max(now(), ((cur && cur.updated) || 0) + 1);
   saveState(); scheduleSync();
 }
 
