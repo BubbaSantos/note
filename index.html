@@ -511,25 +511,28 @@ function fmtLink() {
   else fmtCmd('createLink', url);
 }
 
-// Light up the toolbar buttons that apply at the cursor / selection.
+// Toolbar lighting: block formats (heading, lists, quote, code, link) light while the cursor is in one. Bold/italic/strike
+// light only when switched on for the text about to be typed, not because the cursor sits in an already-bold word.
 // Inline formats (bold/italic/strike) at a bare cursor are tracked here, because browsers disagree about what
 // queryCommandState says right after a toggle: `pend` remembers the toggle until the cursor moves.
 const INLINE = { bold: ['bold', /^(B|STRONG)$/], italic: ['italic', /^(I|EM)$/], strike: ['strikeThrough', /^(S|STRIKE|DEL)$/] };
 let pend = null;   // { node, off, vals: { bold: bool, ... } }
 function caretKey() { const s = getSelection(); return s.rangeCount && s.isCollapsed ? { node: s.anchorNode, off: s.anchorOffset } : null; }
 function sameCaret(p) { const c = caretKey(); return !!(p && c && c.node === p.node && c.off === p.off); }
+// Does the text at the cursor carry this format right now? (used to decide what a tap does)
 function inlineOn(name) {
   if (pend && sameCaret(pend) && name in pend.vals) return pend.vals[name];
   const [cmd, re] = INLINE[name];
   if (closest(/^H[1-6]$/)) return !!closest(re);   // headings are bold by default
   try { return document.queryCommandState(cmd); } catch (e) { return !!closest(re); }
 }
+const pendOn = name => !!(pend && sameCaret(pend) && pend.vals[name] === true);
 function paintFmt() {
   if (document.activeElement !== edEl()) return;
   if (pend && !sameCaret(pend)) pend = null;
   const li = closest(/^LI$/), h = closest(/^H[1-3]$/);
   const on = {
-    bold: inlineOn('bold'), italic: inlineOn('italic'), strike: inlineOn('strike'),
+    bold: pendOn('bold'), italic: pendOn('italic'), strike: pendOn('strike'),   // lit only when switched on for the next typed text
     h: !!h, ul: !!li && li.parentNode.nodeName === 'UL' && !li.hasAttribute('data-chk'),
     ol: !!li && li.parentNode.nodeName === 'OL', chk: !!li && li.hasAttribute('data-chk'),
     quote: !!closest(/^BLOCKQUOTE$/), code: !!closest(/^CODE$/), link: !!closest(/^A$/),
@@ -539,6 +542,11 @@ function paintFmt() {
 }
 const paintSoon = () => { paintFmt(); setTimeout(paintFmt, 60); };
 document.addEventListener('selectionchange', paintFmt);
+edEl().addEventListener('input', () => {
+  if (!pend) return;
+  const k = caretKey();
+  if (k) { pend.node = k.node; pend.off = k.off; } else pend = null;
+});
 for (const ev of ['input', 'keyup', 'touchend', 'click']) edEl().addEventListener(ev, () => setTimeout(paintFmt, 30));
 function onKey(e) {
   if (e.key === 'Enter' && closest(/^LI$/)) setTimeout(() => {   // a new checklist item starts unchecked
