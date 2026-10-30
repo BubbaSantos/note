@@ -199,6 +199,8 @@
            autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
   </div>
   <button class="btn" onclick="saveSettings()">Connect</button>
+  <button class="btn ghost" onclick="refreshApp()">Refresh app</button>
+  <p class="set-sub" style="margin-top:0">Loads the latest version. Your notes stay on this phone.</p>
   <button class="btn ghost" id="set-back" onclick="showScreen('list-screen')" style="display:none">Back</button>
 </div>
 
@@ -596,6 +598,17 @@ async function syncNow(manual) {
     syncing = false;
     if (syncAgain) { syncAgain = false; scheduleSync(); }
   }
+}
+
+// Drop the offline cache and service worker, then reload so the newest version is fetched.
+// Notes live in localStorage, which this leaves alone.
+async function refreshApp() {
+  showToast('Refreshing…');
+  try {
+    if ('serviceWorker' in navigator) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+    if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+  } catch (e) {}
+  location.reload();
 }
 
 // ── START ─────────────────────────────────────────────
