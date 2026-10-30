@@ -493,8 +493,9 @@ function paintFmt() {
   const st = c => { try { return document.queryCommandState(c); } catch (e) { return false; } };
   const li = closest(/^LI$/), h = closest(/^H[1-3]$/);
   const on = {
-    bold: !!closest(/^(B|STRONG)$/) || (!h && st('bold')), italic: !!closest(/^(I|EM)$/) || (!h && st('italic')),
-    strike: !!closest(/^(S|STRIKE|DEL)$/) || (!h && st('strikeThrough')),
+    // queryCommandState follows pending toggles at a collapsed cursor; headings are bold by default, so look at tags there
+    bold: h ? !!closest(/^(B|STRONG)$/) : st('bold'), italic: h ? !!closest(/^(I|EM)$/) : st('italic'),
+    strike: h ? !!closest(/^(S|STRIKE|DEL)$/) : st('strikeThrough'),
     h: !!h, ul: !!li && li.parentNode.nodeName === 'UL' && !li.hasAttribute('data-chk'),
     ol: !!li && li.parentNode.nodeName === 'OL', chk: !!li && li.hasAttribute('data-chk'),
     quote: !!closest(/^BLOCKQUOTE$/), code: !!closest(/^CODE$/), link: !!closest(/^A$/),
