@@ -82,7 +82,9 @@
     #ed-text { flex: 1; width: 100%; overflow-y: auto; outline: none; color: var(--text); position: relative;
       font-size: 17px; line-height: 1.55; padding: 16px 18px calc(24px + env(safe-area-inset-bottom)); word-wrap: break-word;
       -webkit-user-select: text; user-select: text; }
-    #ed-text.empty::before { content: attr(data-placeholder); color: var(--dim); position: absolute; pointer-events: none; }
+    #ed-text { text-align: left; }
+    /* placeholder rides on the first line (not absolutely positioned, which iOS Safari places oddly) */
+    #ed-text.blank > :first-child::before { content: 'Start typing…'; color: var(--dim); float: left; height: 0; pointer-events: none; }
     #ed-text h1, #ed-text h2, #ed-text h3 { line-height: 1.25; margin: 10px 0 4px; font-family: ui-rounded, -apple-system, sans-serif; }
     #ed-text h1 { font-size: 26px; } #ed-text h2 { font-size: 21px; } #ed-text h3 { font-size: 18px; }
     #ed-text ul, #ed-text ol { margin: 2px 0; padding-left: 24px; }
@@ -176,7 +178,7 @@
       </button>
     </div>
   </div>
-  <div id="ed-text" class="empty" contenteditable="true" data-placeholder="Start typing…" oninput="onEdit()" onblur="flushEdit()" onkeydown="onKey(event)"></div>
+  <div id="ed-text" class="blank" contenteditable="true" data-placeholder="Start typing…" oninput="onEdit()" onblur="flushEdit()" onkeydown="onKey(event)"></div>
   <div class="ed-tools"><div class="ed-meta" id="ed-meta" style="flex:1;text-align:right"></div></div>
   <div class="fmt" id="fmt" onmousedown="event.preventDefault()" ontouchstart="">
     <button data-f="bold" onclick="fmtCmd('bold')" aria-label="Bold"><b>B</b></button>
@@ -447,7 +449,7 @@ function htmlToMd(root) {
 const getText = () => htmlToMd(edEl());
 function norm(md) { const d = document.createElement('div'); d.innerHTML = mdToHtml(md); return htmlToMd(d); }
 function setText(md) { edEl().innerHTML = mdToHtml(md); paintEmpty(); }
-function paintEmpty() { const el = edEl(); el.classList.toggle('empty', !el.textContent.trim() && !el.querySelector('li,pre')); }
+function paintEmpty() { const el = edEl(); el.classList.toggle('blank', !el.textContent.trim() && !el.querySelector('li,pre')); }
 
 // ── toolbar ──
 function closest(re) {

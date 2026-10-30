@@ -1,5 +1,5 @@
 // Cache the app shell so Note opens offline; API calls always go to the network.
-const CACHE = 'note-v9';
+const CACHE = 'note-v11';
 const SHELL = ['./', 'index.html', 'icon.svg', 'icon.png', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(
