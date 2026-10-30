@@ -556,6 +556,37 @@ function paintFmt() {
 }
 const paintSoon = () => { paintFmt(); setTimeout(paintFmt, 60); };
 document.addEventListener('selectionchange', paintFmt);
+// Notion-style typing shortcuts: a marker + space at the start of an empty line turns it into that block.
+//   [] / [ ] → to-do   - / * / + → bullet   1. → numbered   # ## ### → heading   > → quote
+const MARKER = /^(\[ ?\]|[-*+]|\d+\.|#{1,3}|>) $/;
+edEl().addEventListener('input', e => {
+  if (e.inputType === 'insertText' && e.data && e.data.endsWith(' ')) setTimeout(autoFormat, 0);   // next tick: no editing commands from inside an input event
+});
+function autoFormat() {
+  const sel = getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed || document.activeElement !== edEl()) return;
+  let b = sel.anchorNode;
+  while (b && b.parentNode !== edEl()) b = b.parentNode;
+  if (!b) return;
+  if (b.nodeType === 3) {                    // a bare first line: give it a block of its own
+    const d = document.createElement('div');
+    edEl().replaceChild(d, b); d.appendChild(b); b = d;
+  }
+  if (b.nodeType !== 1 || !/^(DIV|P)$/.test(b.nodeName)) return;   // only plain lines (not already a list, heading or quote)
+  const m = b.textContent.replace(/[\u00a0\u200b]/g, ' ').match(MARKER);
+  if (!m) return;
+  const mk = m[1];
+  b.innerHTML = '<br>';
+  const r = document.createRange(); r.setStart(b, 0); r.collapse(true);
+  sel.removeAllRanges(); sel.addRange(r);
+  if (mk[0] === '[')      fmtCheck();
+  else if (mk === '>')    fmtQuote();
+  else if (mk[0] === '#') fmtCmd('formatBlock', '<h' + mk.length + '>');
+  else if (/^\d/.test(mk)) fmtList('insertOrderedList');
+  else                    fmtList('insertUnorderedList');
+  onEdit();
+}
+
 // Safety net for browsers that let typed text inherit the neighbouring format: after each typed character,
 // make its bold/italic/strike match the buttons (does nothing when the browser already got it right).
 edEl().addEventListener('input', e => {
