@@ -107,6 +107,7 @@
     .fmt button { flex: none; min-width: calc(var(--fb) + 4px); height: var(--fb); padding: 0 8px; background: none; border: none; border-radius: 12px;
       color: var(--dim); font-size: var(--ff); font-weight: 700; cursor: pointer; }
     .fmt button:active { background: var(--surface2); color: var(--text); }
+    .fmt button.on { background: var(--accent); color: var(--accent-ink); }
     .seg { display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 3px; gap: 3px; }
     .seg button { flex: 1; background: none; border: none; border-radius: 9px; color: var(--dim); font-size: 15px; font-weight: 600; padding: 10px 0; cursor: pointer; }
     .seg button.on { background: var(--accent); color: var(--accent-ink); }
@@ -180,18 +181,18 @@
   <div id="ed-text" class="blank" contenteditable="true" data-placeholder="Start typing…" oninput="onEdit()" onblur="flushEdit()" onkeydown="onKey(event)"></div>
   <div class="ed-tools"><div class="ed-meta" id="ed-meta" style="flex:1;text-align:right"></div></div>
   <div class="fmt" id="fmt" onmousedown="event.preventDefault()" ontouchstart="">
-    <button onclick="fmtCmd('bold')" aria-label="Bold"><b>B</b></button>
-    <button onclick="fmtCmd('italic')" aria-label="Italic"><i style="font-family:serif">I</i></button>
-    <button onclick="fmtCmd('strikeThrough')" aria-label="Strikethrough"><s>S</s></button>
+    <button data-f="bold" onclick="fmtCmd('bold')" aria-label="Bold"><b>B</b></button>
+    <button data-f="italic" onclick="fmtCmd('italic')" aria-label="Italic"><i style="font-family:serif">I</i></button>
+    <button data-f="strike" onclick="fmtCmd('strikeThrough')" aria-label="Strikethrough"><s>S</s></button>
     <span class="sep"></span>
-    <button onclick="fmtHeading()" aria-label="Heading">H</button>
-    <button onclick="fmtList('insertUnorderedList')" aria-label="Bullet list">•</button>
-    <button onclick="fmtList('insertOrderedList')" aria-label="Numbered list">1.</button>
-    <button onclick="fmtCheck()" aria-label="Checklist"><svg viewBox="0 0 24 24" width="1.15em" height="1.15em" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 12l3 3 5-6"/></svg></button>
+    <button data-f="h" onclick="fmtHeading()" aria-label="Heading">H</button>
+    <button data-f="ul" onclick="fmtList('insertUnorderedList')" aria-label="Bullet list">•</button>
+    <button data-f="ol" onclick="fmtList('insertOrderedList')" aria-label="Numbered list">1.</button>
+    <button data-f="chk" onclick="fmtCheck()" aria-label="Checklist"><svg viewBox="0 0 24 24" width="1.15em" height="1.15em" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 12l3 3 5-6"/></svg></button>
     <span class="sep"></span>
-    <button onclick="fmtQuote()" aria-label="Quote">❝</button>
-    <button onclick="fmtCode()" aria-label="Code">&lt;/&gt;</button>
-    <button onclick="fmtLink()" aria-label="Link">🔗</button>
+    <button data-f="quote" onclick="fmtQuote()" aria-label="Quote">❝</button>
+    <button data-f="code" onclick="fmtCode()" aria-label="Code">&lt;/&gt;</button>
+    <button data-f="link" onclick="fmtLink()" aria-label="Link">🔗</button>
   </div>
   </div>
 </div>
@@ -456,11 +457,21 @@ function closest(re) {
   while (n && n !== edEl()) { if (n.nodeType === 1 && re.test(n.nodeName)) return n; n = n.parentNode; }
   return null;
 }
-function fmtCmd(c, v) { edEl().focus(); document.execCommand(c, false, v); onEdit(); }
+function fmtCmd(c, v) {
+  const el = edEl(); el.focus();
+  const name = Object.keys(INLINE).find(k => INLINE[k][0] === c);
+  const was = name ? inlineOn(name) : null;
+  document.execCommand(c, false, v); onEdit();
+  if (name) {
+    const k = caretKey();
+    pend = k ? { node: k.node, off: k.off, vals: Object.assign({}, sameCaret(pend) ? pend.vals : {}, { [name]: !was }) } : null;
+  }
+  paintSoon();
+}
 function fmtList(c) {
   const li = closest(/^LI$/);
   if (li && li.hasAttribute('data-chk') && c === 'insertUnorderedList') {   // checklist → plain bullets
-    selLis().forEach(x => x.removeAttribute('data-chk')); onEdit(); return;
+    selLis().forEach(x => x.removeAttribute('data-chk')); onEdit(); paintSoon(); return;
   }
   fmtCmd(c);
 }
@@ -477,7 +488,7 @@ function fmtCheck() {
     if (!li || li.parentNode.nodeName !== 'UL') document.execCommand('insertUnorderedList');
     selLis().forEach(x => { if (!x.hasAttribute('data-chk')) x.setAttribute('data-chk', '0'); });
   }
-  onEdit();
+  onEdit(); paintSoon();
 }
 function fmtHeading() {   // none → H1 → H2 → H3 → none
   const t = (closest(/^H[1-6]$/) || {}).nodeName;
@@ -486,7 +497,7 @@ function fmtHeading() {   // none → H1 → H2 → H3 → none
 function fmtQuote() { fmtCmd('formatBlock', closest(/^BLOCKQUOTE$/) ? '<div>' : '<blockquote>'); }
 function fmtCode() {
   const c = closest(/^CODE$/);
-  if (c) { c.replaceWith(...c.childNodes); onEdit(); return; }
+  if (c) { c.replaceWith(...c.childNodes); onEdit(); paintSoon(); return; }
   const sel = getSelection().toString() || 'code';
   fmtCmd('insertHTML', '<code>' + esc(sel) + '</code>');
 }
@@ -500,6 +511,35 @@ function fmtLink() {
   else fmtCmd('createLink', url);
 }
 
+// Light up the toolbar buttons that apply at the cursor / selection.
+// Inline formats (bold/italic/strike) at a bare cursor are tracked here, because browsers disagree about what
+// queryCommandState says right after a toggle: `pend` remembers the toggle until the cursor moves.
+const INLINE = { bold: ['bold', /^(B|STRONG)$/], italic: ['italic', /^(I|EM)$/], strike: ['strikeThrough', /^(S|STRIKE|DEL)$/] };
+let pend = null;   // { node, off, vals: { bold: bool, ... } }
+function caretKey() { const s = getSelection(); return s.rangeCount && s.isCollapsed ? { node: s.anchorNode, off: s.anchorOffset } : null; }
+function sameCaret(p) { const c = caretKey(); return !!(p && c && c.node === p.node && c.off === p.off); }
+function inlineOn(name) {
+  if (pend && sameCaret(pend) && name in pend.vals) return pend.vals[name];
+  const [cmd, re] = INLINE[name];
+  if (closest(/^H[1-6]$/)) return !!closest(re);   // headings are bold by default
+  try { return document.queryCommandState(cmd); } catch (e) { return !!closest(re); }
+}
+function paintFmt() {
+  if (document.activeElement !== edEl()) return;
+  if (pend && !sameCaret(pend)) pend = null;
+  const li = closest(/^LI$/), h = closest(/^H[1-3]$/);
+  const on = {
+    bold: inlineOn('bold'), italic: inlineOn('italic'), strike: inlineOn('strike'),
+    h: !!h, ul: !!li && li.parentNode.nodeName === 'UL' && !li.hasAttribute('data-chk'),
+    ol: !!li && li.parentNode.nodeName === 'OL', chk: !!li && li.hasAttribute('data-chk'),
+    quote: !!closest(/^BLOCKQUOTE$/), code: !!closest(/^CODE$/), link: !!closest(/^A$/),
+  };
+  document.querySelectorAll('#fmt button[data-f]').forEach(b => b.classList.toggle('on', !!on[b.dataset.f]));
+  document.querySelector('#fmt [data-f="h"]').textContent = h ? h.nodeName : 'H';
+}
+const paintSoon = () => { paintFmt(); setTimeout(paintFmt, 60); };
+document.addEventListener('selectionchange', paintFmt);
+for (const ev of ['input', 'keyup', 'touchend', 'click']) edEl().addEventListener(ev, () => setTimeout(paintFmt, 30));
 function onKey(e) {
   if (e.key === 'Enter' && closest(/^LI$/)) setTimeout(() => {   // a new checklist item starts unchecked
     const li = closest(/^LI$/);
