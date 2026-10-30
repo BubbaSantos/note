@@ -114,6 +114,26 @@
     .fmt .sep { flex: none; width: 1px; margin: 8px 4px; background: var(--border); }
     .ed-tools { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-top: 1px solid var(--border); }
     .toast-undo { color: var(--accent); font-weight: 700; margin-left: 12px; cursor: pointer; pointer-events: auto; }
+    .chips { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip { flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; color: var(--dim);
+      font-size: 14px; font-weight: 600; padding: 7px 14px; cursor: pointer; white-space: nowrap; }
+    .chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+    .chip .n { opacity: .6; font-weight: 500; margin-left: 4px; }
+    .chip.ghost { background: none; border-style: dashed; }
+    .chip.danger { color: var(--error); }
+    .card-folder { float: right; font-size: 12px; font-weight: 600; color: var(--dim); background: var(--surface2);
+      border-radius: 999px; padding: 2px 9px; margin-left: 8px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: flex-end; z-index: 60; }
+    .sheet.show { display: flex; }
+    .sheet-card { width: 100%; max-height: 70dvh; overflow-y: auto; background: var(--surface); border-radius: 22px 22px 0 0;
+      padding: 14px 14px calc(18px + env(safe-area-inset-bottom)); }
+    .sheet-title { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); margin: 4px 6px 10px; }
+    .sheet-row { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: none;
+      border-radius: 12px; padding: 14px 12px; font-size: 17px; text-align: left; cursor: pointer; color: var(--text); }
+    .sheet-row:active { background: var(--surface2); }
+    .sheet-row .tick { color: var(--accent); font-weight: 800; }
+    .sheet-row.new { color: var(--accent); font-weight: 600; }
     .ed-meta { padding: 6px 18px; font-size: 12px; color: var(--dim); }
 
     /* ── SETTINGS ─────────────────────────────── */
@@ -142,6 +162,7 @@
 <body>
 
 <div id="toast"></div>
+<div id="sheet" class="sheet" onclick="if (event.target === this) closeSheet()"><div class="sheet-card" id="sheet-card"></div></div>
 
 <!-- ── LIST ─────────────────────────────────────── -->
 <div id="list-screen" class="screen">
@@ -158,6 +179,7 @@
       </div>
     </div>
     <input class="search" id="search" type="search" placeholder="Search notes" autocomplete="off" oninput="renderList()">
+    <div class="chips" id="chips"></div>
   </div>
   <div id="list"></div>
   <button id="fab" onclick="newNote()" aria-label="New note"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -170,6 +192,9 @@
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Notes
     </button>
     <div class="ed-actions">
+      <button class="icon-btn" id="folder-btn" onclick="openMoveSheet()" title="Move to folder" aria-label="Move to folder">
+        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      </button>
       <button class="icon-btn" id="fmt-toggle" onclick="setFmtBar()" title="Formatting toolbar" aria-label="Formatting toolbar">
         <span style="font-weight:800;font-size:15px;letter-spacing:-.02em">Aa</span>
       </button>
@@ -229,7 +254,8 @@
 // deleted: { id: epoch }                   tombstones, so a delete reaches every device
 // synced: { id: updated }                  the version last confirmed on the server
 let cfg = {};
-let notes = [], deleted = {}, synced = {};
+let notes = [], folders = [], deleted = {}, synced = {};
+let view = localStorage.getItem('nt_view'); if (view === null) view = '*';   // '*' = all notes, '' = no folder, else a folder id
 let currentId = null;
 let syncing = false, syncAgain = false;
 
@@ -248,11 +274,12 @@ function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem('nt_state') || '{}');
     notes = Array.isArray(s.notes) ? s.notes : [];
+    folders = Array.isArray(s.folders) ? s.folders : [];
     deleted = s.deleted || {}; synced = s.synced || {};
-  } catch { notes = []; deleted = {}; synced = {}; }
+  } catch { notes = []; folders = []; deleted = {}; synced = {}; }
 }
 function saveState() {
-  localStorage.setItem('nt_state', JSON.stringify({ notes, deleted, synced }));
+  localStorage.setItem('nt_state', JSON.stringify({ notes, folders, deleted, synced }));
 }
 
 // ── NOTE HELPERS ──────────────────────────────────────
@@ -276,6 +303,12 @@ function relTime(ts) {
   return dt.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 const getNote = id => notes.find(n => n.id === id) || null;
+const getFolder = id => folders.find(f => f.id === id) || null;
+const folderOf = n => (n && n.folder && getFolder(n.folder)) ? n.folder : '';     // a vanished folder shows as "no folder"
+const sortedFolders = () => folders.slice().sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+const notesInView = () => sortedNotes().filter(n => view === '*' || folderOf(n) === view);
+function setView(v, quiet) { view = v; localStorage.setItem('nt_view', v); if (!quiet) renderList(); }
+function validateView() { if (view !== '*' && view !== '' && !getFolder(view)) setView('*', true); }
 const sortedNotes = () => notes.slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updated - a.updated);
 
 // ── SCREENS ───────────────────────────────────────────
@@ -298,19 +331,36 @@ function showToast(msg, undo) {
 function setDot(state) { document.getElementById('dot').className = 'dot ' + state; }
 
 // ── LIST ──────────────────────────────────────────────
+function renderChips() {
+  const count = id => notes.filter(n => id === '*' || folderOf(n) === id).length;
+  const chip = (id, name, n) => `<button class="chip${view === id ? ' on' : ''}" data-view="${esc(id)}">${esc(name)}<span class="n">${n}</span></button>`;
+  let h = chip('*', 'All', count('*')) + chip('', 'No folder', count(''));
+  for (const f of sortedFolders()) h += chip(f.id, f.name, count(f.id));
+  h += `<button class="chip ghost" onclick="newFolder()">＋ Folder</button>`;
+  if (getFolder(view)) h += `<button class="chip ghost" onclick="renameFolder()">Rename</button><button class="chip ghost danger" onclick="deleteFolder()">Delete</button>`;
+  document.getElementById('chips').innerHTML = h;
+}
+document.getElementById('chips').addEventListener('click', e => {
+  const c = e.target.closest('.chip[data-view]');
+  if (c) setView(c.dataset.view);
+});
+
 function renderList() {
+  validateView();
+  renderChips();
   const q = document.getElementById('search').value.trim().toLowerCase();
-  let list = sortedNotes();
+  let list = notesInView();
   if (q) list = list.filter(n => (n.text || '').toLowerCase().includes(q));
   const el = document.getElementById('list');
   if (!list.length) {
     el.innerHTML = q
       ? `<div class="empty"><b>No matches</b>Nothing contains “${esc(q)}”.</div>`
-      : `<div class="empty"><b>No notes yet</b>Tap + to write one.</div>`;
+      : view === '*' ? `<div class="empty"><b>No notes yet</b>Tap + to write one.</div>`
+      : `<div class="empty"><b>Nothing here yet</b>Tap + to write a note in this folder.</div>`;
     return;
   }
   const card = n => `<div class="card${n.pinned ? ' pinned' : ''}" data-id="${esc(n.id)}">
-      <div class="card-title">${esc(boxes(title(n)))}</div>
+      <div class="card-title">${view === '*' && folderOf(n) ? `<span class="card-folder">${esc(getFolder(folderOf(n)).name)}</span>` : ''}${esc(boxes(title(n)))}</div>
       ${preview(n) ? `<div class="card-prev">${esc(preview(n))}</div>` : ''}
       <div class="card-time">${esc(relTime(n.updated))}</div>
     </div>`;
@@ -328,7 +378,7 @@ document.getElementById('list').addEventListener('click', e => {
 let editTimer = null, lastInput = 0;
 
 function newNote() {
-  const n = { id: 'n-' + Date.now() + '-' + Math.floor(Math.random() * 1e6), text: '', pinned: false, updated: now() };
+  const n = { id: 'n-' + Date.now() + '-' + Math.floor(Math.random() * 1e6), text: '', pinned: false, updated: now(), folder: getFolder(view) ? view : '' };
   notes.unshift(n);
   openEditor(n.id, true);
 }
@@ -681,6 +731,66 @@ function deleteCurrent() {
     saveState(); renderList(); scheduleSync();
   });
 }
+// ── FOLDERS ───────────────────────────────────────────
+function newFolder(thenMove) {
+  const name = (prompt('Folder name') || '').trim();
+  if (!name) return null;
+  const f = { id: 'f-' + Date.now() + '-' + Math.floor(Math.random() * 1e6), name, updated: now() };
+  folders.push(f);
+  saveState(); scheduleSync();
+  if (thenMove) return f.id;
+  setView(f.id);
+  return f.id;
+}
+function renameFolder(id, name) {
+  const f = getFolder(id || view); if (!f) return;
+  name = (name !== undefined ? name : prompt('Rename folder', f.name) || '').trim();
+  if (!name || name === f.name) return;
+  f.name = name; f.updated = Math.max(now(), f.updated + 1);
+  saveState(); renderList(); scheduleSync();
+}
+function deleteFolder() {
+  const f = getFolder(view); if (!f) return;
+  const n = notes.filter(x => x.folder === f.id).length;
+  if (!confirm(`Delete “${f.name}”?` + (n ? ` Its ${n} note${n === 1 ? '' : 's'} will move to “No folder”.` : ''))) return;
+  removeFolder(f.id);
+}
+function removeFolder(id) {
+  const cur = getFolder(id);
+  for (const n of notes) if (n.folder === id) { n.folder = ''; n.updated = Math.max(now(), n.updated + 1); }   // notes survive
+  folders = folders.filter(f => f.id !== id);
+  deleted[id] = Math.max(now(), ((cur && cur.updated) || 0) + 1);
+  if (view === id) setView('*', true);
+  saveState(); renderList(); scheduleSync();
+}
+function moveNote(id, folderId) {
+  const n = getNote(id); if (!n) return false;
+  const fid = getFolder(folderId) ? folderId : '';
+  if ((n.folder || '') === fid) return false;
+  n.folder = fid; n.updated = Math.max(now(), n.updated + 1);     // bumping `updated` is what makes the move sync
+  if (view !== '*' && view !== fid) setView(fid, true);           // follow the note so it stays on screen
+  saveState(); scheduleSync();
+  return true;
+}
+function openMoveSheet() {
+  if (!currentId) return;
+  flushEdit();
+  const cur = folderOf(getNote(currentId));
+  const row = (fid, name, cls) => `<button class="sheet-row ${cls || ''}" data-fid="${esc(fid)}">${esc(name)}${cur === fid && !cls ? '<span class="tick">✓</span>' : ''}</button>`;
+  document.getElementById('sheet-card').innerHTML = '<div class="sheet-title">Move to folder</div>' + row('', 'No folder') +
+    sortedFolders().map(f => row(f.id, f.name)).join('') + `<button class="sheet-row new" data-new="1">＋ New folder…</button>`;
+  document.getElementById('sheet').classList.add('show');
+}
+function closeSheet() { document.getElementById('sheet').classList.remove('show'); }
+document.getElementById('sheet-card').addEventListener('click', e => {
+  const b = e.target.closest('.sheet-row'); if (!b) return;
+  let fid = b.dataset.fid;
+  if (b.dataset.new) { fid = newFolder(true); if (fid === null) return; }
+  closeSheet();
+  if (moveNote(currentId, fid)) showToast('Moved to ' + (fid ? getFolder(fid).name : 'No folder'));
+  paintEditorMeta();
+});
+
 function removeNote(id, quiet) {
   const cur = getNote(id);
   notes = notes.filter(n => n.id !== id);
@@ -735,6 +845,7 @@ function hdrs() {
 let syncTimer = null;
 function scheduleSync() { clearTimeout(syncTimer); syncTimer = setTimeout(() => syncNow(false), 800); }
 
+// A server row's folder: null/undefined = written by a client that doesn't know folders (keep ours); '' = no folder.
 function mergeRemote(rows) {
   let changed = false;
   for (const r of rows) {
@@ -746,47 +857,98 @@ function mergeRemote(rows) {
     } else {
       if (r.id in deleted && deleted[r.id] >= r.updated) continue;
       const mine = getNote(r.id);
-      if (!mine) { notes.push({ id: r.id, text: r.text, pinned: r.pinned, updated: r.updated }); changed = true; }
-      else if (r.updated > mine.updated) { mine.text = r.text; mine.pinned = r.pinned; mine.updated = r.updated; changed = true; }
+      if (!mine) {
+        const n = { id: r.id, text: r.text, pinned: r.pinned, updated: r.updated };
+        if (r.folder != null) n.folder = r.folder;
+        notes.push(n); changed = true;
+      } else if (r.updated > mine.updated) {
+        mine.text = r.text; mine.pinned = r.pinned; mine.updated = r.updated;
+        if (r.folder != null) mine.folder = r.folder;
+        changed = true;
+      }
     }
   }
   return changed;
 }
+function mergeRemoteFolders(rows) {
+  let changed = false;
+  for (const r of rows) {
+    synced[r.id] = Math.max(synced[r.id] || 0, r.updated);
+    if (r.deleted) {
+      if (!(r.id in deleted) || r.updated > deleted[r.id]) { deleted[r.id] = r.updated; changed = true; }
+      const mine = getFolder(r.id);
+      if (mine && mine.updated <= r.updated) { folders = folders.filter(f => f.id !== r.id); changed = true; }
+    } else {
+      if (r.id in deleted && deleted[r.id] >= r.updated) continue;
+      const mine = getFolder(r.id);
+      if (!mine) { folders.push({ id: r.id, name: r.name, updated: r.updated }); changed = true; }
+      else if (r.updated > mine.updated) { mine.name = r.name; mine.updated = r.updated; changed = true; }
+    }
+  }
+  return changed;
+}
+
+// Folders need the 002_folders.sql migration. Until it has been run the server answers 4xx for them: carry on with
+// plain notes, keep folders on this phone, and try the folder parts again every few minutes.
+const folderSync = { ok: true, retryAt: 0 };
+const noFolders = () => { folderSync.ok = false; folderSync.retryAt = Date.now() + 5 * 60 * 1000; };
+const is4xx = r => r.status >= 400 && r.status < 500;
 
 async function syncNow(manual) {
   if (!isConfigured()) { if (manual) showToast('Set a notes code first'); return; }
   if (syncing) { syncAgain = true; return; }
   syncing = true; setDot('busy');
   try {
-    // pull
+    // pull notes (with their folder, unless the server has no folder column yet)
+    if (!folderSync.ok && Date.now() >= folderSync.retryAt) folderSync.ok = true;
+    const code = encodeURIComponent(cfg.code);
     const since = Number(localStorage.getItem('nt_since') || 0);
-    const res = await fetch(`${cfg.url}/rest/v1/quick_notes?note_code=eq.${encodeURIComponent(cfg.code)}` +
-      `&updated=gt.${since}&select=id,text,pinned,updated,deleted&order=updated.asc`, { headers: hdrs() });
+    const notesUrl = cols => `${cfg.url}/rest/v1/quick_notes?note_code=eq.${code}&updated=gt.${since}&select=${cols}&order=updated.asc`;
+    let res = await fetch(notesUrl('id,text,pinned,updated,deleted' + (folderSync.ok ? ',folder' : '')), { headers: hdrs() });
+    if (!res.ok && is4xx(res) && folderSync.ok) { noFolders(); res = await fetch(notesUrl('id,text,pinned,updated,deleted'), { headers: hdrs() }); }
     if (!res.ok) throw new Error('pull ' + res.status);
     const rows = await res.json();
-    if (rows.length) {
-      const changed = mergeRemote(rows);
-      // overlap a little so a skewed clock can't hide an edit
-      localStorage.setItem('nt_since', String(Math.max(0, rows[rows.length - 1].updated - 120)));
-      if (changed) {
-        saveState(); renderList();
-        const n = getNote(currentId);
-        if (n && n.text !== getText() && norm(n.text) !== getText() && Date.now() - lastInput > 3000) { setText(n.text); paintEditorMeta(); }
-        if (currentId && !getNote(currentId)) { currentId = null; showScreen('list-screen'); }
-      }
+    let frows = [];
+    if (folderSync.ok) {
+      const sinceF = Number(localStorage.getItem('nt_since_f') || 0);
+      const fr = await fetch(`${cfg.url}/rest/v1/quick_folders?note_code=eq.${code}&updated=gt.${sinceF}&select=id,name,updated,deleted&order=updated.asc`, { headers: hdrs() });
+      if (fr.ok) frows = await fr.json();
+      else if (is4xx(fr)) noFolders();
+      else throw new Error('pull folders ' + fr.status);
+      if (frows.length) localStorage.setItem('nt_since_f', String(Math.max(0, frows[frows.length - 1].updated - 120)));
     }
-    // push
-    const out = [];
-    for (const n of notes) if (n.text.trim() && n.updated > (synced[n.id] || 0)) out.push({ id: n.id, text: n.text, pinned: !!n.pinned, updated: n.updated, deleted: false });
-    for (const id in deleted) if (deleted[id] > (synced[id] || 0)) out.push({ id, text: '', pinned: false, updated: deleted[id], deleted: true });
+    if (rows.length) localStorage.setItem('nt_since', String(Math.max(0, rows[rows.length - 1].updated - 120)));   // overlap so a skewed clock can't hide an edit
+    const changed = mergeRemote(rows) | mergeRemoteFolders(frows);
+    if (changed) {
+      saveState(); renderList();
+      const n = getNote(currentId);
+      if (n && n.text !== getText() && norm(n.text) !== getText() && Date.now() - lastInput > 3000) { setText(n.text); paintEditorMeta(); }
+      if (currentId && !getNote(currentId)) { currentId = null; showScreen('list-screen'); }
+    }
+    // push (folder tombstones go to the folders table, never the notes table)
+    const out = [], fout = [];
+    for (const n of notes) if (n.text.trim() && n.updated > (synced[n.id] || 0)) out.push({ id: n.id, text: n.text, pinned: !!n.pinned, updated: n.updated, deleted: false, folder: n.folder || '' });
+    for (const f of folders) if (f.updated > (synced[f.id] || 0)) fout.push({ id: f.id, name: f.name, updated: f.updated, deleted: false });
+    for (const id in deleted) if (deleted[id] > (synced[id] || 0)) {
+      if (id.startsWith('f-')) fout.push({ id, name: '', updated: deleted[id], deleted: true });
+      else out.push({ id, text: '', pinned: false, updated: deleted[id], deleted: true, folder: '' });
+    }
     if (out.length) {
       const p = await fetch(`${cfg.url}/rest/v1/rpc/upsert_quick_notes`, {
         method: 'POST', headers: hdrs(), body: JSON.stringify({ p_code: cfg.code, p_notes: out }),
       });
       if (!p.ok) throw new Error('push ' + p.status);
       for (const o of out) synced[o.id] = Math.max(synced[o.id] || 0, o.updated);
-      saveState();
     }
+    if (fout.length && folderSync.ok) {
+      const p = await fetch(`${cfg.url}/rest/v1/rpc/upsert_quick_folders`, {
+        method: 'POST', headers: hdrs(), body: JSON.stringify({ p_code: cfg.code, p_folders: fout }),
+      });
+      if (p.ok) for (const o of fout) synced[o.id] = Math.max(synced[o.id] || 0, o.updated);
+      else if (is4xx(p)) noFolders();
+      else throw new Error('push folders ' + p.status);
+    }
+    saveState();
     setDot('ok');
     if (manual) showToast('Synced');
   } catch (e) {
