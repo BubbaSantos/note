@@ -308,7 +308,7 @@ const folderOf = n => (n && n.folder && getFolder(n.folder)) ? n.folder : '';   
 const sortedFolders = () => folders.slice().sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 const notesInView = () => sortedNotes().filter(n => view === '*' || folderOf(n) === view);
 function setView(v, quiet) { view = v; localStorage.setItem('nt_view', v); if (!quiet) renderList(); }
-function validateView() { if (view !== '*' && view !== '' && !getFolder(view)) setView('*', true); }
+function validateView() { if (view !== '*' && !getFolder(view)) setView('*', true); }   // All notes is the only built-in view; unfiled notes live in it
 const sortedNotes = () => notes.slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updated - a.updated);
 
 // ── SCREENS ───────────────────────────────────────────
@@ -334,7 +334,7 @@ function setDot(state) { document.getElementById('dot').className = 'dot ' + sta
 function renderChips() {
   const count = id => notes.filter(n => id === '*' || folderOf(n) === id).length;
   const chip = (id, name, n) => `<button class="chip${view === id ? ' on' : ''}" data-view="${esc(id)}">${esc(name)}<span class="n">${n}</span></button>`;
-  let h = chip('*', 'All', count('*')) + chip('', 'No folder', count(''));
+  let h = chip('*', 'All', count('*'));
   for (const f of sortedFolders()) h += chip(f.id, f.name, count(f.id));
   h += `<button class="chip ghost" onclick="newFolder()">＋ Folder</button>`;
   if (getFolder(view)) h += `<button class="chip ghost" onclick="renameFolder()">Rename</button><button class="chip ghost danger" onclick="deleteFolder()">Delete</button>`;
@@ -754,7 +754,7 @@ function renameFolder(id, name) {
 function deleteFolder() {
   const f = getFolder(view); if (!f) return;
   const n = notes.filter(x => x.folder === f.id).length;
-  if (!confirm(`Delete “${f.name}”?` + (n ? ` Its ${n} note${n === 1 ? '' : 's'} will move to “No folder”.` : ''))) return;
+  if (!confirm(`Delete “${f.name}”?` + (n ? ` Its ${n} note${n === 1 ? '' : 's'} will stay in All notes.` : ''))) return;
   removeFolder(f.id);
 }
 function removeFolder(id) {
@@ -770,7 +770,7 @@ function moveNote(id, folderId) {
   const fid = getFolder(folderId) ? folderId : '';
   if ((n.folder || '') === fid) return false;
   n.folder = fid; n.updated = Math.max(now(), n.updated + 1);     // bumping `updated` is what makes the move sync
-  if (view !== '*' && view !== fid) setView(fid, true);           // follow the note so it stays on screen
+  if (view !== '*' && view !== fid) setView(fid || '*', true);    // follow the note so it stays on screen (out of a folder = All)
   saveState(); scheduleSync();
   return true;
 }
@@ -779,7 +779,7 @@ function openMoveSheet() {
   flushEdit();
   const cur = folderOf(getNote(currentId));
   const row = (fid, name, cls) => `<button class="sheet-row ${cls || ''}" data-fid="${esc(fid)}">${esc(name)}${cur === fid && !cls ? '<span class="tick">✓</span>' : ''}</button>`;
-  document.getElementById('sheet-card').innerHTML = '<div class="sheet-title">Move to folder</div>' + row('', 'No folder') +
+  document.getElementById('sheet-card').innerHTML = '<div class="sheet-title">Move to folder</div>' + (cur ? row('', 'Remove from folder') : '') +
     sortedFolders().map(f => row(f.id, f.name)).join('') + `<button class="sheet-row new" data-new="1">＋ New folder…</button>`;
   document.getElementById('sheet').classList.add('show');
 }
@@ -789,7 +789,7 @@ document.getElementById('sheet-card').addEventListener('click', e => {
   let fid = b.dataset.fid;
   if (b.dataset.new) { fid = newFolder(true); if (fid === null) return; }
   closeSheet();
-  if (moveNote(currentId, fid)) showToast('Moved to ' + (fid ? getFolder(fid).name : 'No folder'));
+  if (moveNote(currentId, fid)) showToast(fid ? 'Moved to ' + getFolder(fid).name : 'Removed from folder');
   paintEditorMeta();
 });
 
