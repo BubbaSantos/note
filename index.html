@@ -609,8 +609,10 @@ document.addEventListener('selectionchange', paintFmt);
 // Notion-style typing shortcuts: a marker + space at the start of an empty line turns it into that block.
 //   [] / [ ] → to-do   - / * / + → bullet   1. → numbered   # ## ### → heading   > → quote
 const MARKER = /^(\[ ?\]|[-*+]|\d+\.|#{1,3}|>) $/;
+// Any insertion can finish the marker (an iPhone keyboard may report the space as a composition or replacement, not
+// plain insertText); autoFormat only acts when the line is exactly "marker + space". Deleting never triggers it.
 edEl().addEventListener('input', e => {
-  if (e.inputType === 'insertText' && e.data && e.data.endsWith(' ')) setTimeout(autoFormat, 0);   // next tick: no editing commands from inside an input event
+  if (!e.inputType || e.inputType.startsWith('insert')) setTimeout(autoFormat, 0);   // next tick: no editing commands from inside an input event
 });
 function autoFormat() {
   const sel = getSelection();
