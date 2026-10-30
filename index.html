@@ -101,10 +101,14 @@
     .fmt { padding-bottom: calc(4px + env(safe-area-inset-bottom)); }
     #editor-screen.kb .fmt { padding-bottom: 4px; }
     .fmt::-webkit-scrollbar { display: none; }
-    .fmt button { flex: none; min-width: 42px; height: 40px; padding: 0 8px; background: none; border: none; border-radius: 10px;
-      color: var(--dim); font-size: 16px; font-weight: 700; cursor: pointer; }
+    :root { --fb: 48px; --ff: 19px; }
+    .fmt button { flex: none; min-width: calc(var(--fb) + 4px); height: var(--fb); padding: 0 8px; background: none; border: none; border-radius: 12px;
+      color: var(--dim); font-size: var(--ff); font-weight: 700; cursor: pointer; }
     .fmt button:active { background: var(--surface2); color: var(--text); }
     .fmt button.on { background: var(--accent); color: var(--accent-ink); }
+    .seg { display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 3px; gap: 3px; }
+    .seg button { flex: 1; background: none; border: none; border-radius: 9px; color: var(--dim); font-size: 15px; font-weight: 600; padding: 10px 0; cursor: pointer; }
+    .seg button.on { background: var(--accent); color: var(--accent-ink); }
     .fmt .sep { flex: none; width: 1px; margin: 8px 4px; background: var(--border); }
     .ed-tools { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-top: 1px solid var(--border); }
     .toast-undo { color: var(--accent); font-weight: 700; margin-left: 12px; cursor: pointer; pointer-events: auto; }
@@ -182,7 +186,7 @@
     <button data-f="h" onclick="fmtHeading()" aria-label="Heading">H</button>
     <button data-f="ul" onclick="fmtList('insertUnorderedList')" aria-label="Bullet list">•</button>
     <button data-f="ol" onclick="fmtList('insertOrderedList')" aria-label="Numbered list">1.</button>
-    <button data-f="chk" onclick="fmtCheck()" aria-label="Checklist"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 12l3 3 5-6"/></svg></button>
+    <button data-f="chk" onclick="fmtCheck()" aria-label="Checklist"><svg viewBox="0 0 24 24" width="1.15em" height="1.15em" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 12l3 3 5-6"/></svg></button>
     <span class="sep"></span>
     <button data-f="quote" onclick="fmtQuote()" aria-label="Quote">❝</button>
     <button data-f="code" onclick="fmtCode()" aria-label="Code">&lt;/&gt;</button>
@@ -199,6 +203,14 @@
     <label>Notes Code</label>
     <input id="s-code" type="text" placeholder="NOTES_CODE from task-sync.conf"
            autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="field">
+    <label>Toolbar size</label>
+    <div class="seg" id="seg-size">
+      <button data-size="small" onclick="setFmtSize('small')">Small</button>
+      <button data-size="medium" onclick="setFmtSize('medium')">Medium</button>
+      <button data-size="large" onclick="setFmtSize('large')">Large</button>
+    </div>
   </div>
   <button class="btn" onclick="saveSettings()">Connect</button>
   <button class="btn ghost" onclick="refreshApp()">Refresh app</button>
@@ -571,6 +583,17 @@ function removeNote(id, quiet) {
   if (id in synced || !quiet) deleted[id] = now();   // tombstone so the delete reaches the other devices
   saveState(); scheduleSync();
 }
+
+// ── TOOLBAR SIZE ──────────────────────────────────────
+const FMT_SIZES = { small: ['40px', '16px'], medium: ['48px', '19px'], large: ['58px', '23px'] };
+function setFmtSize(size, quiet) {
+  if (!FMT_SIZES[size]) size = 'medium';
+  const root = document.documentElement.style;
+  root.setProperty('--fb', FMT_SIZES[size][0]); root.setProperty('--ff', FMT_SIZES[size][1]);
+  document.querySelectorAll('#seg-size button').forEach(b => b.classList.toggle('on', b.dataset.size === size));
+  if (!quiet) localStorage.setItem('nt_fmt', size);
+}
+setFmtSize(localStorage.getItem('nt_fmt') || 'medium', true);
 
 // ── SETTINGS ──────────────────────────────────────────
 function openSettings() {
