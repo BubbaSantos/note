@@ -519,17 +519,27 @@ const INLINE = { bold: ['bold', /^(B|STRONG)$/], italic: ['italic', /^(I|EM)$/],
 let pend = null;   // { node, off, vals: { bold: bool, ... } }
 function caretKey() { const s = getSelection(); return s.rangeCount && s.isCollapsed ? { node: s.anchorNode, off: s.anchorOffset } : null; }
 function sameCaret(p) { const c = caretKey(); return !!(p && c && c.node === p.node && c.off === p.off); }
-// Does the text at the cursor carry this format right now? (used to decide what a tap does)
+// Will text typed here carry this format? Our own pending toggle wins, else whatever the cursor sits inside.
 function inlineOn(name) {
   if (pend && sameCaret(pend) && name in pend.vals) return pend.vals[name];
-  const [cmd, re] = INLINE[name];
-  if (closest(/^H[1-6]$/)) return !!closest(re);   // headings are bold by default
-  try { return document.queryCommandState(cmd); } catch (e) { return !!closest(re); }
+  return !!closest(INLINE[name][1]);
+}
+// The buttons alone decide the format of new text: with a button dark, make sure text typed at a bare cursor does
+// not inherit that format from the neighbouring text.
+function syncTyping() {
+  const k = caretKey(); if (!k) return;
+  for (const name of Object.keys(INLINE)) {
+    const want = pendOn(name);
+    if (inlineOn(name) === want) continue;
+    document.execCommand(INLINE[name][0]);
+    pend = { node: k.node, off: k.off, vals: Object.assign({}, sameCaret(pend) ? pend.vals : {}, { [name]: want }) };
+  }
 }
 const pendOn = name => !!(pend && sameCaret(pend) && pend.vals[name] === true);
 function paintFmt() {
   if (document.activeElement !== edEl()) return;
   if (pend && !sameCaret(pend)) pend = null;
+  syncTyping();
   const li = closest(/^LI$/), h = closest(/^H[1-3]$/);
   const on = {
     bold: pendOn('bold'), italic: pendOn('italic'), strike: pendOn('strike'),   // lit only when switched on for the next typed text
