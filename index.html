@@ -165,20 +165,7 @@
     <input id="s-code" type="text" placeholder="NOTES_CODE from task-sync.conf"
            autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
   </div>
-  <details class="adv" id="adv">
-    <summary>Advanced</summary>
-    <div class="field">
-      <label>Supabase URL</label>
-      <input id="s-url" type="url" placeholder="https://xxxx.supabase.co"
-             autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
-    </div>
-    <div class="field">
-      <label>Anon Key</label>
-      <input id="s-key" type="password" placeholder="eyJ…"
-             autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
-    </div>
-  </details>
-  <button class="btn" onclick="saveSettings()">Save &amp; Connect</button>
+  <button class="btn" onclick="saveSettings()">Connect</button>
   <button class="btn ghost" id="set-back" onclick="showScreen('list-screen')" style="display:none">Back</button>
 </div>
 
@@ -195,11 +182,11 @@ let syncing = false, syncAgain = false;
 const now = () => Math.floor(Date.now() / 1000);
 const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
+// Same Supabase project as QuickSend; the anon key is a public client key.
+const DEFAULT_URL = 'https://baafdbfmcdviwszphuvl.supabase.co';
+const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYWZkYmZtY2R2aXdzenBodXZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Nzg0MDQsImV4cCI6MjA5ODI1NDQwNH0.ph6fyXVeOz9f_NRSEQwq-yGYntpadmHakz2eg_14S-M';
 function loadConfig() {
-  // QuickSend lives at the same address, so its saved connection can be reused.
-  const url = localStorage.getItem('nt_url') || localStorage.getItem('qs_url') || '';
-  const key = localStorage.getItem('nt_key') || localStorage.getItem('qs_key') || '';
-  cfg = { url: url.replace(/\/$/, ''), key, code: localStorage.getItem('nt_code') || '' };
+  cfg = { url: DEFAULT_URL, key: DEFAULT_KEY, code: localStorage.getItem('nt_code') || '' };
 }
 const isConfigured = () => !!(cfg.url && cfg.key && cfg.code);
 
@@ -384,19 +371,14 @@ function removeNote(id, quiet) {
 // ── SETTINGS ──────────────────────────────────────────
 function openSettings() {
   document.getElementById('s-code').value = cfg.code;
-  document.getElementById('s-url').value = cfg.url;
-  document.getElementById('s-key').value = cfg.key;
   document.getElementById('set-back').style.display = isConfigured() ? '' : 'none';
-  document.getElementById('adv').open = !(cfg.url && cfg.key);
   showScreen('settings-screen');
 }
 function saveSettings() {
   const code = document.getElementById('s-code').value.trim();
-  const url = document.getElementById('s-url').value.trim().replace(/\/$/, '');
-  const key = document.getElementById('s-key').value.trim();
-  if (!code || !url || !key) { showToast('Fill in the code, URL and key'); return; }
+  if (!code) { showToast('Enter your notes code'); return; }
   const changed = code !== cfg.code;
-  localStorage.setItem('nt_code', code); localStorage.setItem('nt_url', url); localStorage.setItem('nt_key', key);
+  localStorage.setItem('nt_code', code);
   if (changed) { localStorage.removeItem('nt_since'); synced = {}; saveState(); }
   loadConfig();
   showScreen('list-screen'); renderList(); syncNow(true);
