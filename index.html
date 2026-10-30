@@ -170,6 +170,9 @@
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Notes
     </button>
     <div class="ed-actions">
+      <button class="icon-btn" id="fmt-toggle" onclick="setFmtBar()" title="Formatting toolbar" aria-label="Formatting toolbar">
+        <span style="font-weight:800;font-size:15px;letter-spacing:-.02em">Aa</span>
+      </button>
       <button class="icon-btn" id="pin-btn" onclick="togglePin()" title="Pin" aria-label="Pin">
         <svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 7 3 3v2H7v-2l3-3z"/></svg>
       </button>
@@ -366,6 +369,7 @@ function inline(t) {
   const codes = [];
   t = t.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return '\u0000' + (codes.length - 1) + '\u0000'; });
   t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>')
+       .replace(/\*\*\*([^*]+)\*\*\*/g, '<b><i>$1</i></b>')
        .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/~~([^~]+)~~/g, '<s>$1</s>')
        .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>');
   return t.replace(/\u0000(\d+)\u0000/g, (_, i) => '<code>' + codes[i] + '</code>');
@@ -625,6 +629,15 @@ function removeNote(id, quiet) {
   if (id in synced || !quiet) deleted[id] = now();   // tombstone so the delete reaches the other devices
   saveState(); scheduleSync();
 }
+
+// ── FORMATTING TOOLBAR ON/OFF ─────────────────────────
+function setFmtBar(on, quiet) {
+  if (on === undefined) on = localStorage.getItem('nt_fmtbar') === '0';   // no argument: flip
+  document.getElementById('fmt').style.display = on ? '' : 'none';
+  document.getElementById('fmt-toggle').classList.toggle('on', on);
+  if (!quiet) localStorage.setItem('nt_fmtbar', on ? '1' : '0');
+}
+setFmtBar(localStorage.getItem('nt_fmtbar') !== '0', true);
 
 // ── TOOLBAR SIZE ──────────────────────────────────────
 const FMT_SIZES = { small: ['40px', '16px'], medium: ['48px', '19px'], large: ['58px', '23px'] };
