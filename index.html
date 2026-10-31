@@ -128,6 +128,7 @@
       color: var(--dim); font-size: var(--ff); font-weight: 700; cursor: pointer; }
     .fmt button:active { background: var(--surface2); color: var(--text); }
     .fmt button.on { background: var(--accent); color: var(--accent-ink); }
+    .fmt button.part { box-shadow: inset 0 0 0 2px var(--accent); color: var(--accent); }   /* only part of the selection has it */
     .seg { display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 3px; gap: 3px; }
     .seg button { flex: 1; background: none; border: none; border-radius: 9px; color: var(--dim); font-size: 15px; font-weight: 600; padding: 10px 0; cursor: pointer; }
     .seg button.on { background: var(--accent); color: var(--accent-ink); }
@@ -754,18 +755,46 @@ function syncTyping() {
   }
 }
 const pendOn = name => !!(pend && sameCaret(pend) && pend.vals[name] === true);
+
+// The formatting of the SELECTED text, per format: true = all of it has it, 'some' = only part, false = none of it.
+// null when nothing is selected (the buttons then show the typing state instead).
+const SEL_TAGS = { bold: /^(B|STRONG)$/, italic: /^(I|EM)$/, strike: /^(S|STRIKE|DEL)$/, code: /^CODE$/, link: /^A$/ };
+function selFormats() {
+  const sel = getSelection(), root = edEl();
+  if (!sel.rangeCount || sel.isCollapsed) return null;
+  const r = sel.getRangeAt(0);
+  if (!root.contains(r.commonAncestorContainer)) return null;
+  const top = r.commonAncestorContainer.nodeType === 3 ? r.commonAncestorContainer.parentNode : r.commonAncestorContainer;
+  const n = { total: 0 }; for (const k in SEL_TAGS) n[k] = 0;
+  const walker = document.createTreeWalker(top, NodeFilter.SHOW_TEXT);
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (!r.intersectsNode(t)) continue;
+    const from = t === r.startContainer ? r.startOffset : 0, to = t === r.endContainer ? r.endOffset : t.length;
+    if (to <= from || /^\s*$/.test(t.data.slice(from, to))) continue;      // (a stray space between two bold words doesn't count)
+    n.total++;
+    for (const k in SEL_TAGS) for (let a = t.parentNode; a && a !== root; a = a.parentNode) if (SEL_TAGS[k].test(a.nodeName)) { n[k]++; break; }
+  }
+  if (!n.total) return null;
+  const out = {}; for (const k in SEL_TAGS) out[k] = n[k] === 0 ? false : n[k] === n.total ? true : 'some';
+  return out;
+}
+
 function paintFmt() {
   if (document.activeElement !== edEl()) return;
   if (pend && !sameCaret(pend)) pend = null;
   syncTyping();
   const li = closest(/^LI$/), h = closest(/^H[1-3]$/);
+  const sf = selFormats();    // text is selected: show what the selection has; otherwise the typing state (off unless switched on)
   const on = {
-    bold: pendOn('bold'), italic: pendOn('italic'), strike: pendOn('strike'),   // lit only when switched on for the next typed text
+    bold: sf ? sf.bold : pendOn('bold'), italic: sf ? sf.italic : pendOn('italic'), strike: sf ? sf.strike : pendOn('strike'),
     h: !!h, ul: !!li && li.parentNode.nodeName === 'UL' && !li.hasAttribute('data-chk'),
     ol: !!li && li.parentNode.nodeName === 'OL', chk: !!li && li.hasAttribute('data-chk'),
-    quote: !!closest(/^BLOCKQUOTE$/), code: !!closest(/^CODE$/), link: !!closest(/^A$/),
+    quote: !!closest(/^BLOCKQUOTE$/), code: sf ? sf.code : !!closest(/^CODE$/), link: sf ? sf.link : !!closest(/^A$/),
   };
-  document.querySelectorAll('#fmt button[data-f]').forEach(b => b.classList.toggle('on', !!on[b.dataset.f]));
+  document.querySelectorAll('#fmt button[data-f]').forEach(b => {
+    b.classList.toggle('on', on[b.dataset.f] === true);
+    b.classList.toggle('part', on[b.dataset.f] === 'some');
+  });
   document.querySelector('#fmt [data-f="h"]').textContent = h ? h.nodeName : 'H';
 }
 const paintSoon = () => { paintFmt(); setTimeout(paintFmt, 60); };
