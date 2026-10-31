@@ -351,7 +351,7 @@
       <option value="0">Off</option>
       <option value="1">On</option>
     </select>
-    <p class="set-sub" style="margin:8px 0 0">Common first names, days and months, once you finish the word. It can't tell a name from a word, so everyday words that are also names (will, mark, rose) are left alone. Add your own here, separated by commas:</p>
+    <p class="set-sub" style="margin:8px 0 0">Common first names, days and months, once you finish the word. It can't tell a name from a word, so everyday words that are also names (will, mark, rose) are left alone. Thousands of Scottish and English surnames are built in. Add your own here, separated by commas, or keep them in a note whose first line is Names:</p>
     <textarea id="cap-x" rows="2" placeholder="e.g. McLaughlin, Zoltan" autocapitalize="off" autocomplete="off" spellcheck="false" onchange="saveCap()" style="margin-top:8px;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--text);font:inherit;font-size:16px;padding:10px 12px"></textarea>
   </div>
   <div class="field">
@@ -393,6 +393,7 @@
 // deleted: { id: epoch }                   tombstones, so a delete reaches every device
 // synced: { id: updated }                  the version last confirmed on the server
 let cfg = {};
+let capPublic = null, capNoteNames = null;     // caches for the capitalising helpers (see CAPITALISING AS YOU TYPE)
 let notes = [], folders = [], deleted = {}, synced = {};
 let view = localStorage.getItem('nt_view'); if (view === null) view = '*';   // '*' = all notes, '' = no folder, else a folder id
 let currentId = null;
@@ -418,6 +419,7 @@ function loadState() {
   } catch { notes = []; folders = []; deleted = {}; synced = {}; }
 }
 function saveState() {
+  capNoteNames = null;
   localStorage.setItem('nt_state', JSON.stringify({ notes, folders, deleted, synced }));
 }
 
@@ -1143,6 +1145,262 @@ const CAP_NAMES = new Set(('james john robert michael william david richard jose
   'matilda ellie phoebe callum liam ewan fraser hamish angus connor jamie ross craig stuart graham colin neil gavin dominic ian nigel ' +
   'simon martin trevor clive darren lee monday tuesday wednesday thursday friday saturday sunday january february april june july ' +
   'august september october november december').split(' '));
+// Surnames from public data (National Records of Scotland, 1975-2025; US Census 2010, 10,000+), everyday words removed.
+const CAP_SURNAMES = (
+  'Abbas Abbott Abdullah Abel Abercrombie Abernethy Abraham Adair Addison Adie Afzal Agnew Ahmad Aikman Ainslie Ainsworth ' +
+  'Aird Airlie Aitchison Aitkenhead Akhtar Akram Ali Allardice Allardyce Allen Alston Amin Amos Andrews Annand Anwar ' +
+  'Appleby Arbuckle Archibald Argo Armit Armitage Arnold Arnot Arnott Arshad Ashcroft Asher Ashraf Ashton Ashworth Asif ' +
+  'Aslam Atkins Atkinson Aziz Baillie Bainbridge Baird Baldwin Balfour Ballantine Ballantyne Balloch Balmer Banks ' +
+  'Bannerman Bannon Barbour Barlow Barnett Barr Barrett Barron Barrowman Barry Bartlett Bashir Batchelor Bateman Bates ' +
+  'Bathgate Bauld Baxter Bayne Beaton Beattie Beaumont Beckett Beedie Begbie Begg Beggs Begley Bennett Bennie Benson ' +
+  'Bentley Benzie Beresford Bernard Berrie Bertram Berwick Bett Beveridge Bews Bibi Biggar Bilal Bilsland Bingham Birnie ' +
+  'Birse Bisset Bissett Blackburn Blackhall Blackie Blackley Blacklock Blackwood Blades Blaikie Blakely Blaney Blyth Boag ' +
+  'Boath Boland Bolton Bonar Bonnar Bonner Borland Borthwick Boswell Bowden Bowen Bowers Bowes Bowie Boyce Boyd Boyes ' +
+  'Boyle Boyne Bradbury Bradford Bradley Brady Braidwood Brannan Brannigan Brawley Brearley Brebner Brechin Breckenridge ' +
+  'Breen Bremner Brennan Breslin Brett Brewster Bridges Briggs Brisbane Britton Broadfoot Broadley Brockie Brodie Brookes ' +
+  'Brooks Brophy Brotherston Browning Brownlee Brownlie Brunton Bryant Bryce Bryceland Bryden Brydon Bryson Buckley ' +
+  'Buglass Buick Buist Bulloch Bunyan Burgoyne Burnett Burns Burnside Burrell Burrows Burt Butchart Butterworth Byers ' +
+  'Byrne Cadden Cahill Cairney Cairnie Cairns Calder Calderwood Caldwell Callaghan Callan Callander Calvert Canavan ' +
+  'Carberry Cardno Carey Cargill Carle Carlton Carlyle Carnegie Carr Carrick Carrie Carrigan Carroll Carruthers Carson ' +
+  'Carstairs Carswell Cartwright Carty Casey Cassells Cassels Cassidy Cassie Cathcart Cattanach Catto Caulfield Cavanagh ' +
+  'Caven Chadwick Chambers Chan Charlton Chaudhry Chen Cherrie Cheung Cheyne Chisholm Christison Clancy Clapperton ' +
+  'Clarkson Clayton Cleary Clegg Cleghorn Cleland Clelland Clements Clifford Clinton Clubb Clunie Clyde Clyne Coates ' +
+  'Coats Cochran Cockburn Codona Coffey Coghill Cohen Coia Coleman Colligan Collin Colquhoun Colville Colvin Comrie ' +
+  'Conaghan Condie Conlan Conlin Conlon Connell Connelly Conner Connon Conroy Convery Cooke Cooney Copeland Copland ' +
+  'Corbett Corcoran Cordiner Cormack Corrigan Cosgrove Cossar Costello Coull Couper Coupland Courtney Coutts Covaci ' +
+  'Coventry Cowe Cowie Coyle Coyne Crabb Craib Craigie Craik Cramb Cran Cranston Crawley Creighton Crichton Crighton ' +
+  'Crockett Croll Crombie Crooks Crosbie Crosby Crossan Crossley Crowe Crowther Cruden Cruickshank Cruickshanks Cullen ' +
+  'Cummings Cummins Cunningham Curley Curran Currie Curtis Cusick Cuthbert Cuthbertson Cuthill D\'Arcy Dailly Daley ' +
+  'Dalgarno Dalgleish Dall Dallas Dalton Daly Dalziel Daniels Dargie Darroch Davey Davie Davison Deakin Deans Deas Deeney ' +
+  'Deighan Delaney Dempsey Denham Denholm Dennison Denny Devaney Devine Devlin Diack Dickie Dickinson Dignan Dillon ' +
+  'Dingwall Divers Dixon Doak Dobie Dobson Dodd Dodds Doherty Doig Dolan Donachie Donaghy Donnelly Donoghue Donohoe ' +
+  'Doogan Doolan Doran Dornan Dorrian Dorward Dougal Dougall Dougan Dougherty Doull Dowds Downes Downey Downie Downs ' +
+  'Doyle Drennan Drever Dryburgh Dryden Duddy Duffin Duffus Duggan Duguid Dunbar Duncanson Dundas Dunlop Dunnachie Dunne ' +
+  'Dunsmore Dunsmuir Durham Durie Duthie Dyet Dykes Eadie Easson Easton Eaton Eccles Eddie Edgar Edmiston Edmond Egan ' +
+  'Elliot Elliott Ellis Elrick Emslie England Erskine Espie Esslemont Esson Etherson Eunson Evans Everett Ewart Ewen ' +
+  'Ewing Fagan Faichney Fairbairn Fairgrieve Fairley Fairlie Fairweather Fallon Farooq Farquhar Farquharson Farrell ' +
+  'Fatima Faulds Faulkner Fawcett Feeney Fegan Fenton Fenwick Fergus Fergusson Fernie Ferns Ferrier Ferries Ferris Fettes ' +
+  'Fiddes Fielding Findlater Findlay Finlay Finnegan Finney Finnie Finnigan Firth Fitzgerald Fitzpatrick Fitzsimmons ' +
+  'Flaherty Flanagan Flannigan Fleming Flett Flockhart Flynn Foley Foote Fordyce Forman Forrest Forrester Forster Forsyth ' +
+  'Fotheringham Fowlie Foy France Freeland French Frew Friel Fullarton Fullerton Fulton Fyfe Fyvie Gaffney Gair Galbraith ' +
+  'Galloway Galt Gammie Gannon Gardiner Gardner Garrett Garrity Garrow Garvie Gaughan Gauld Gault Gaw Gebbie Geddes ' +
+  'Gellatly Gemmell Georgeson Gerrie Gibb Gibbons Gibbs Gifford Gilbertson Gilchrist Giles Gilfillan Gillen Gillies ' +
+  'Gilligan Gilliland Gillon Gilmartin Gilroy Girdwood Girvan Glancy Glasgow Glendinning Glennie Glover Goddard Godfrey ' +
+  'Goldie Goodall Goodwin Gordon Gorman Gormley Gorrie Goudie Gough Gould Govan Gove Gow Gowans Gracie Grady Grainger ' +
+  'Grandison Greenan Greene Greenhill Greenlees Greenshields Greer Greig Gribben Grier Grierson Grigor Grimes Groves ' +
+  'Grubb Gupta Hackett Hadden Haddow Hagan Haggart Haggarty Haggerty Haig Hainey Haining Haldane Halkett Halley Halliday ' +
+  'Hamid Hamill Hammond Hampson Hampton Hancock Handley Hanif Hanley Hanlon Hanna Hannan Hannigan Hanratty Hansen Hanson ' +
+  'Hardie Harding Hargreaves Harkin Harkins Harkness Harrigan Harrington Harrold Harrower Harte Hartley Harvey Harvie ' +
+  'Harwood Hassan Hastie Hastings Haston Hatton Haughey Hawkins Hawthorne Haxton Hayes Haynes Heaney Hedley Heenan Heeps ' +
+  'Hegarty Heggie Hendrie Hendry Hepburn Herbert Herriot Herron Hetherington Hewitson Hewitt Hickman Hicks Hiddleston ' +
+  'Hillhouse Hillis Hilton Hird Hislop Hobbs Hobson Hodge Hodgson Hoey Hogarth Hoggan Holden Holland Holliday Holloway ' +
+  'Hollywood Honeyman Hopkins Horne Horner Horton Hosie Hossack Houghton Houston Howard Howat Howe Howell Howie Howieson ' +
+  'Howitt Hudson Hughson Hume Humphrey Humphreys Humphries Hussain Hutcheon Hutcheson Hutchinson Hutchison Hutton Hynd ' +
+  'Hyndman Hynds Hynes Hyslop Imran Inglis Ingram Inkster Innes Iqbal Irfan Irons Ironside Irvine Irving Irwin Islam ' +
+  'Izatt Jackson Jacobs Jaffray Jamieson Jappy Jardine Jarvie Jarvis Javed Jeffery Jenkins Jennings Johns Johnson ' +
+  'Johnston Junor Kane Kavanagh Kay Kean Keane Kearney Kearns Keating Keay Keegan Keenan Keir Kelbie Kellock Kelman Kelso ' +
+  'Kendall Kennedy Kenney Kenny Kenyon Keogh Kerr Kerrigan Kershaw Kettles Khalid Kidd Kiernan Kilday Kilgour Killen ' +
+  'Kilpatrick Kincaid Kinghorn Kinloch Kinnaird Kinsella Kirby Kirkham Kirkland Kirkpatrick Kirkwood Knowles Kumar Kydd ' +
+  'Lacey Lafferty Laidlaw Laing Lambie Lammie Lamond Lancaster Langan Langlands Lappin Lapsley Larkin Latham Latimer ' +
+  'Latto Lau Lauchlan Laughlan Laurenson Laurie Lavelle Laverty Lawlor Lawrie Leadbetter Learmonth Leask Leckie Ledingham ' +
+  'Lees Leggat Leggate Legge Leighton Leiper Leishman Leitch Leith Lennon Lennox Leonard Leslie Letham Leyden Liddell ' +
+  'Liddle Lilley Lind Linton Liston Lithgow Littlejohn Liu Livingston Lloyd Lobban Lochhead Lochrie Locke Lockhart Lockie ' +
+  'Loftus Logie Logue Longmuir Lonie Lothian Loudon Loughlin Loughran Lovie Lowe Lowrie Lowther Luke Lumsden Lundie Lunn ' +
+  'Lusk Lyle Lynas Lynn Lyon Lyons Mabon Macarthur Macaskill Macaulay Macbean Macbeath Maccallum Maccoll Maccuish ' +
+  'Macdiarmid Macdougall Macfadyen Macgillivray Macgregor Macinnes Macintyre Maciver Mackellar Mackin Maclachlan ' +
+  'Maclellan Maclennan Macmillan Macnab Macnaughton Macneill Macpherson Macqueen Macritchie Macsween Mactaggart Macvicar ' +
+  'Magee Magill Maguire Maher Mahmood Mahon Mains Mair Maitland Malcolm Malcolmson Maley Malik Malloch Mallon Malloy ' +
+  'Malone Maloney Maltman Manderson Manson Markey Marks Marley Marr Marsden Marshall Marwick Massey Massie Masterson ' +
+  'Masterton Mather Mathers Matheson Mathewson Mathie Mathieson McAdam McAleer McAleese McAlinden McAlister McAllan ' +
+  'McAllister McAlpine McAndrew McAra McArdle McArthur McAteer McAulay McAuley McAusland McAvoy McBain McBean McBeath ' +
+  'McBeth McBrearty McBurnie McCabe McCafferty McCaffery McCaffrey McCaig McCall McCallion McCallum McCann McCarroll ' +
+  'McCarron McCarthy McCauley McCleary McClelland McCloy McClung McClure McClurg McCluskie McClymont McColgan McColm ' +
+  'McCombe McCombie McConachie McConnachie McConnell McConville McCool McCord McCormack McCormick McCorquodale McCrae ' +
+  'McCreadie McCready McCreath McCrindle McCrone McCrorie McCrory McCrossan McCubbin McCue McCullagh McCullough McCusker ' +
+  'McCutcheon McDade McDaid McDermid McDermott McDevitt McDiarmid McDonagh McDonald McDonnell McDowall McDowell ' +
+  'McElhinney McElroy McEvoy McEwen McFadzean McFall McGarrigle McGarrity McGarry McGarva McGarvey McGarvie McGavin McGaw ' +
+  'McGeachie McGeachy McGeoch McGeough McGhee McGhie McGibbon McGillivray McGilvray McGinlay McGinley McGinn McGinnes ' +
+  'McGivern McGlashan McGlinchey McGlone McGlynn McGoldrick McGonigle McGougan McGovern McGowan McGrath McGraw McGroarty ' +
+  'McGrory McGuffie McGuigan McGuinness McGurk McGurn McHale McHarg McHattie McHugh McIlroy McIlwraith McInally McIndoe ' +
+  'McInnes McIntosh McIntyre McInulty McIver McIvor McKean McKechnie McKee McKell McKellar McKelvie McKendry McKenna ' +
+  'McKenzie McKeown McKernan McKerracher McKerrow McKie McKillop McKinlay McKinley McKinney McKinnon McKinven McKirdy ' +
+  'McKnight McLachlan McLagan McLarty McLatchie McLauchlan McLaughlan McLay McLeary McLeish McLellan McLelland McLeman ' +
+  'McLennan McLeod McLintock McLoughlin McLuckie McLuskey McMahon McManus McMaster McMath McMeekin McMenamin McMenemy ' +
+  'McMichael McMillan McMinn McMorran McMullan McMullen McMurdo McMurray McMurtrie McNab McNair McNally McNamara McNamee ' +
+  'McNaught McNaughton McNee McNeil McNeilly McNeish McNicol McNicoll McNiven McNulty McPake McPhail McPhee McPherson ' +
+  'McPhillips McQuade McQuarrie McQueen McQuillan McRitchie McRobbie McRobert McRoberts McSeveney McShane McSherry ' +
+  'McSkimming McSorley McSporran McTaggart McTavish McTurk McVeigh McVey McVicar McVie McWhinnie McWhirter McWilliam ' +
+  'McWilliams Mearns Meechan Meehan Meighan Meikle Meiklejohn Mellon Mellor Melrose Melville Melvin Mennie Menzies ' +
+  'Metcalfe Methven Miah Michie Middlemass Miles Millan Millen Milligan Milliken Mills Milroy Milton Minto Moar Moffat ' +
+  'Moffatt Mohamed Mohammad Mollison Molloy Monaghan Moncrieff Moncur Montague Montgomerie Montgomery Moodie Mooney Moran ' +
+  'Morison Morrice Morton Motion Mowat Mowatt Moyes Muhammad Muir Muirhead Muldoon Mulgrew Mulholland Mullan Mullen ' +
+  'Mullin Mulvey Munn Murchie Murdoch Murison Mustafa Mutch Myers Myles Nadeem Nairn Naismith Napier Nash Naylor Neal ' +
+  'Neale Neary Neave Neeson Neill Neish Nesbitt Neville Newall Newbigging Newell Newlands Newman Nguyen Nichol Nicholl ' +
+  'Nicholls Nimmo Nisbet Niven Nixon Norman Norrie Norris Norton Notman Nowak Nugent O\'Brien O\'Connell O\'Connor O\'Donnell ' +
+  'O\'Hagan O\'Hanlon O\'Hara O\'Hare O\'Kane O\'Malley O\'Neil O\'Reilly O\'Rourke O\'Shea O\'Sullivan Oakley Oates Ogg Ogston ' +
+  'Oliphant Ord Ormiston Orr Osborne Oswald Owen Owens Pacitti Palmer Panton Paris Parker Parkes Parkinson Parsons Patel ' +
+  'Paterson Paton Pattison Patton Paxton Payne Pearce Pearson Peddie Peden Peebles Pender Pennycook Percy Perkins Perrie ' +
+  'Peterson Pettigrew Phillips Philp Picken Pickering Pinkerton Pirrie Pitt Platt Plenderleith Plunkett Polson Poole ' +
+  'Porteous Pottinger Potts Powell Prescott Preston Pringle Pritchard Proudfoot Pryde Pugh Purcell Purdie Purdon Purves ' +
+  'Purvis Quigley Quinn Qureshi Rae Raeburn Raeside Rafferty Rafiq Rahman Rainey Ralston Ramage Ramsay Ramzan Rana ' +
+  'Randall Rankin Rankine Rashid Ratcliffe Rattray Raza Rea Redmond Redpath Reekie Rees Reeves Rehman Reith Rendall ' +
+  'Renfrew Rennie Renton Renwick Rhind Rhodes Riach Richards Richmond Riddell Riddoch Ridley Rigby Riley Rintoul Ritchie ' +
+  'Robbie Robbins Roberts Robinson Robison Robson Rocks Rodden Roddie Rodger Rodgers Rogan Rogers Rogerson Rollo ' +
+  'Ronaldson Rosie Rossi Rourke Rowe Rowley Roxburgh Runciman Rutherford Ruthven Sadler Saeed Saleem Salmond Salter ' +
+  'Samson Sandeman Sanders Sandford Sandilands Sandison Sands Sangster Sarwar Saunders Sawers Scally Scanlan Scanlon ' +
+  'Schofield Scobbie Scobie Scorgie Scotland Scoular Seath Seaton Sellar Semple Sewell Seymour Shahid Shahzad Shand ' +
+  'Shankland Shanks Shannon Sharif Sharkey Sharma Sharpe Shedden Sheppard Sheridan Sherlock Sherwood Shewan Shields ' +
+  'Shiels Sibbald Siddique Sillars Sime Simmonds Simmons Skea Skelly Skelton Skene Skilling Skinner Slaven Slavin Slessor ' +
+  'Sloan Sloss Smail Smeaton Smellie Smillie Smyth Snedden Somerville Sommerville Sorley Spalding Speirs Spencer Spiers ' +
+  'Spink Spowart Sproat Stables Stafford Stanley Stanners Stanton Steedman Steele Stenhouse Stephens Stephenson Stevens ' +
+  'Stevenson Stillie Stirling Stirrat Stitt Stocks Stoddart Storie Storrie Stott Strachan Strang Strathearn Stratton ' +
+  'Strickland Stronach Struthers Stubbs Sturrock Sullivan Summers Suttie Sutton Swankie Swanson Swanston Sweeney Swinton ' +
+  'Sykes Syme Symington Symon Taggart Tahir Tait Talbot Tannahill Tannock Tariq Tasker Tate Tawse Telford Templeton ' +
+  'Tennant Thom Thorburn Thorne Thornton Thorpe Thow Tierney Timmins Tinney Toal Tobin Tocher Tollan Tolmie Tomlinson ' +
+  'Toner Tonner Torrance Torrie Towler Townsend Townsley Tracey Traill Tran Travers Traynor Troup Tsang Tulloch Tully ' +
+  'Turner Turpie Tyrrell Ure Urquhart Usman Vallance Vallely Vance Vass Vaughan Veitch Venters Vickers Waddell Waite ' +
+  'Wales Waller Wallis Walls Walsh Walton Wang Wardlaw Wardrop Wardrope Wark Warner Warnock Warrender Warwick Wason ' +
+  'Waterson Waterston Watkins Watters Watts Waugh Weatherston Webb Welch Weldon Wells Wemyss Weston Westwater Westwood ' +
+  'Whalen Wharton Wheatley Whelan Whitaker Whitefield Whiteford Whitehouse Whitelaw Whiteside Whitfield Whitson Whittaker ' +
+  'Whitton Whyte Whytock Wiggins Wightman Wilcox Wilkes Wilkie Wilkins Wilkinson Williams Williamson Willis Willox Wills ' +
+  'Winchester Winters Winton Wishart Wong Woodburn Woods Woodward Wotherspoon Wray Wyatt Wylie Wyllie Wyness Wynn Wynne ' +
+  'Wyper Wyse Yates Yeaman Yeats Younger Youngson Yuill Zhang Zheng Zhou Garcia Rodriguez Martinez Hernandez Lopez ' +
+  'Gonzalez Perez Sanchez Ramirez Torres Flores Rivera Gomez Diaz Cruz Reyes Morales Gutierrez Ortiz Ramos Kim Chavez ' +
+  'Mendoza Ruiz Alvarez Castillo Jimenez Gonzales Vasquez Romero Moreno Herrera Medina Aguilar Castro Fernandez ' +
+  'Washington Vargas Guzman Olson Mendez Snyder Munoz Wagner Salazar Meyer Schmidt Garza Nichols Soto Kelley Vazquez ' +
+  'Santos Alvarado Delgado Hoffman Pena Contreras Sandoval Guerrero Rios Estrada Ortega Nunez Valdez Larson Santiago ' +
+  'Maldonado Carlson Dominguez Obrien Vega Jensen Espinoza McCoy Weber Rojas Marquez Fields Padilla Schultz Luna Mejia ' +
+  'Acosta Juarez Cortez Schneider Navarro Figueroa Keller Avila Molina Campos Byrd Ayala Frazier Powers Carrillo Shelton ' +
+  'Schwartz Duran McDaniel Parks Vaughn Becker Deleon Leon Pham Graves Wolfe Cabrera Zimmerman Lara Robles Cervantes ' +
+  'Solis Erickson Chang Klein Salinas Fuentes Velasquez Aguirre Ochoa Griffith Oconnor Cardenas Pacheco Calderon Rivas ' +
+  'Serrano Rosales Christensen Harmon Reese Trujillo Adkins Fischer Delacruz Montoya Hines Castaneda Sherman Hubbard ' +
+  'Hodges Guerra Valencia Franco Gallegos Schroeder Camacho Floyd Ibarra Suarez Orozco Salas Andrade Bauer Escobar ' +
+  'Mueller Hartman Kramer Lindsey Velazquez Sparks Macias Villanueva Zamora Ballard Villarreal Barrera Pineda Mercado ' +
+  'Santana Bautista Shaffer Trevino Hess Beil Petersen Roth Lozano Rangel Flowers Arias Valenzuela Meyers Weiss Decker ' +
+  'Yoder Zuniga Melendez Roberson Larsen Conley Rocha Jefferson Monroe Pittman Huynh Combs Mathis Galvan Boone Velez Meza ' +
+  'York Tapia Gates Sosa Phelps Dickerson Mathews Bonilla Acevedo Benitez Zavala Hensley Glenn Cisneros Harrell Rubio ' +
+  'Huffman Choi Boyer Callahan Arellano Oneill Beltran Pitts Parrish Koch Cantu Wiley Russo Villegas Wilkerson McClain ' +
+  'Montes Mata Rosario Henson Oneal Mosley Beasley Huerta Blackwell Solomon Guevara Woodard Cortes Merritt Murillo ' +
+  'Salgado Kline Cordova Barajas Rosas Jacobson Lester Meadows Davila Pruitt Dejesus Marin Berger Blankenship Gaines ' +
+  'Palacios Cuevas Dorsey Odonnell Hendricks Calhoun Duarte Ellison Nielsen Sellers Leblanc Esparza Hardin Knapp Herman ' +
+  'Spears Weeks Frederick McFarland Hebert Enriquez Quintero Randolph Schaefer Trejo Pennington Conrad Donovan Mays ' +
+  'Mahoney Raymond Medrano Hahn Felix Lucero Bernal Nava Ayers Ventura Avery Mayer Bender Shepard Landry Sampson Moses ' +
+  'Magana Dunlap Espinosa Rivers Farley Friedman Truong Correa Blevins Delarosa Benton Lugo Portillo Haley Phan ' +
+  'Villalobos Blanchard Finley Quintana Esquivel Dodson Xiong Hayden Cano Huber Moyer Lim Frye McCarty Avalos Booker ' +
+  'Parra Jaramillo Krueger Rasmussen Brandt Peralta Maynard Galindo Estes Sanford Burch Maddox Oconnell Andersen Schmitt ' +
+  'Compton Dudley Alfaro Hester Hinton Novak Terrell Reyna Cantrell Hendrix Rollins Whitney Odom Daugherty Travis Haas ' +
+  'Nieves Kaufman Krause Riggs Braun Werner Quinones Saldana Hays Pierre Haney Saenz Vera Levine Rosa Cho Ferrell Dotson ' +
+  'Shea Becerra Ritter Cooley Amaya Chaney Velasco Ngo Cheng Frey Barrios Holman Tovar Cardona Dailey Merrill Osborn Goff ' +
+  'Zapata Kang Sears Lehman Snider Lutz Gallardo Blanco Katz Kuhn Valle Marino Pickett Aguilera Witt Carrasco Donahue ' +
+  'Kinney Britt Odell Baez Rodrigues Wooten Cleveland Crowley Dillard Lange Bruno Segura Castellanos Tillman Alford ' +
+  'Mackey Emerson Muniz Childers Moser Vogel Alonso Saucedo Starr Hurtado Hendrickson Holley Cordero Franks Guillen ' +
+  'Ratliff Talley Goldstein Pereira Joyner Richter Farris Tracy Han Mayfield Hoang Cramer Goldberg Morin Kaplan Osorio ' +
+  'Haines Meeks Gilliam Zepeda Escobedo Arredondo Mobley Kessler Romano Oneil Tyson Bui Downing Holcomb Hollis Carranza ' +
+  'Chu Childs Belcher Womack Baca Sorensen McCray Pierson Chacon Renteria Kendrick Ferreira Boggs Pryor Sargent Tuttle ' +
+  'Denton Jamison Puckett Coronado Olvera Manuel Burks Quiroz Montano Paredes Delatorre Langley Dwyer Polk Lemus ' +
+  'Covington Clemons Rosado Broussard McGinnis Sheehan Rutledge Corbin Carmona Burris Whitley Hamm Bermudez Stinson ' +
+  'Orellana Varela Rucker Gustafson Webber Dewitt Rosenberg Simms Romo Hutchins Granados Goss Lott Leyva Hinojosa Gil ' +
+  'Crabtree McClellan Rico Soriano Fonseca Madrid Aragon Aquino Elmore Worley Simons Quezada Ott Ocampo Aviles Nieto ' +
+  'Ervin Shafer Plummer Michel Paz Yanez Gregg Abrams Beatty Serna Meier Swartz Gleason Padgett Ackerman Ziegler Vinson ' +
+  'Eldridge Pina Schumacher Akers Mayes Albright Burgos Manley Helton Givens Tipton Coffman Childress Elkins Duong ' +
+  'Edmonds Gomes Buckner Walden Griggs Clifton Yarbrough Elias Meredith Uribe Hoskins Tatum Schafer Bustamante Stover ' +
+  'Crowder Schulz Canales Tolbert Lund Shapiro Navarrete Gamez Inman Crews Kurtz Blanton Reece Liang Francisco Tompkins ' +
+  'Jung Anaya Olivares Newsome Thurman Helms Metcalf Goldman Schmitz Arevalo Conklin Holbrook Neely Hollingsworth ' +
+  'Benavides Bullard Steiner Bowles Payton Chappell Hagen Phipps Masters Jeffries Montalvo Prado Thao Driscoll Dubois ' +
+  'Feldman Coker Kimball Ivey Butts Jewell Barragan Machado Rubin Reynoso Wesley Cabral Gallo Aldridge Swenson Hinkle ' +
+  'Ornelas Colbert Aleman Rodriquez Arrington Goins Whaley Esposito Neff Casillas Lilly Biggs Yeager Godwin Sprague Rosen ' +
+  'Quintanilla Billings Koenig Erwin Tellez Norwood Ames Ludwig Souza Huggins Amador Dunham Goode Kauffman Oleary Cuellar ' +
+  'Winn Zhao Ramey Stahl Ybarra Samuels Dukes Snell Blackmon Grimm Meade Ojeda Geiger Lujan Babcock Winkler Bragg Engel ' +
+  'Valadez Carbajal Jarrett Bolden Wolff Hadley McDonough Ohara Feliciano Winston Betancourt Godinez Kilgore Pimentel ' +
+  'Cornell Arreola Siegel Hankins Raines Thacker Sotelo Dugan Bower Brantley Sheets Stiles Willard Stanford Zhu Irvin ' +
+  'Matos Gagnon Tidwell Lovell Hoyt Spivey Patino Marrero Hager Brito Lanier Zarate Escamilla Otero Henley Voss Greenberg ' +
+  'Venegas McNeal Metzger Beal Jorgensen Maurer Timmons Palma Escalante Schaffer Guidry Yee Kruse Hurd Valdes Leung ' +
+  'Houser Thomason Sapp Tripp Galvez Eubanks Hilliard Crocker Caruso Alonzo Barnard Metz Carlisle Hargrove Dasilva ' +
+  'Ledesma Messer Westbrook Posey Cornelius Benoit Barnhart Rendon Pedersen Starks Sizemore Epps Olivas Bergeron ' +
+  'Hightower Paige Boucher Fontenot Washburn Farr McCollum Betts Wilhelm Blount Murdock Lockwood Hinson Rudolph Waiters ' +
+  'Sepulveda Duvall Casas Doan Langston Sheffield Tackett Locklear Linares Polanco Marroquin Connors Trent Toth Rushing ' +
+  'Cody Gamboa Shipley Mena Prieto Oliva Layton Goodrich Burger Toledo Lovett Gipson Arce Ledbetter Arteaga Penn Jiang ' +
+  'Whitman Burkett Koehler Christiansen Sheldon Pritchett Paulson Roland Aranda Hyatt Arriaga Engle Valentin Yost ' +
+  'Langford Herndon Lai Reeder Landers Mims Delossantos Vallejo Lima Cronin Oliveira McCain Medeiros Kraus Stacy Pettit ' +
+  'Pulido Roche Zaragoza Isaac Spaulding Keys Sylvester Barrientos Ogden McClendon Araujo Sumner Saavedra Gillis Landis ' +
+  'Caudill Jacobsen Overton Diehl Hedrick Toney Darby Mansfield Dietz Smallwood Vidal Kiser Peoples Beyer Desai Banuelos ' +
+  'Spangler Mondragon Rizzo Ledford Allred Bledsoe Rhoades Ricks Spicer Ordonez Chavarria Dobbs Negron Triplett Hathaway ' +
+  'Salcedo Presley Ernst Haywood Putnam Najera Stapleton Batista Lopes Richey Keyes Youngblood Capps Cates Covarrubias ' +
+  'Cao Judd Barbosa Hawley Varner Staley Kowalski Moya Vogt Kimble Barraza Fernandes Abreu Doty Crum Corley Bernstein ' +
+  'Darnell Hwang Fong Akins Bergman Delong Moreland Lorenzo Longoria Pelletier Sneed Skaggs Alcala Munson Eason Keene ' +
+  'Cerda Marcus Crain Cagle Bauman Crespo Cornejo Omalley Albrecht Mallory Cavanaugh Jaimes Begay Argueta Grover Michaels ' +
+  'Whittington Aldrich Heredia Waldron Oakes Hanks Grossman Neumann Ashby Vernon Crowell Blum Jeffers Mai Dumas Ceja ' +
+  'Okeefe Shultz Cormier Madsen Cavazos Busch Burroughs Schuster Bagley Whitt Stallings Eckert Boykin Saldivar Woodson ' +
+  'Huddleston Hoff Staples Mireles Mohr Ambrose Bellamy McLain Greco Zimmer Moseley Atwood Brunson Mott Zambrano Dinh ' +
+  'Hirsch Dutton Ferrer Hooks Bustos Vandyke Troyer Hoffmann Lunsford Grayson Bueno Cottrell Whitlock Bello Frias Knutson ' +
+  'Hsu Comer Hamlin Schwab Gauthier Haskins Stovall Coe Torrez Dupree Eastman Crandall Nunn Almeida Pendleton Gerber ' +
+  'Schrader Burnette Calloway Bartley Kohler Acuna Ulrich Chau Schulte Thayer Nevarez Jansen Alaniz Honeycutt Baer ' +
+  'Rosenthal Pickens Balderas Giordano Pappas Henning Carrera Burkhart Arnett Reagan Anguiano Lincoln Tamayo Perdue ' +
+  'Easley Hogue Orourke Rincon Abernathy Altman Huston Ennis Adler Ontiveros Baum Ruffin Laughlin Rader Trimble Russ ' +
+  'Montanez Woodall Marcum Stoner Mattson Means London Adame Bynum Farias Brannon Cazares Brenner Ladd Willoughby Kinsey ' +
+  'Dozier Hairston Holguin Faust Deluca Lyles Dias Felton Schreiber Berman Schaeffer Sams Saylor Robledo Espino Hauser ' +
+  'Boudreaux Nickerson Sorenson Rowell Yoon Espinal Dietrich Bruner Valdivia Jernigan Schwarz Chapa Prather Seals Wetzel ' +
+  'Parham Stjohn Hutson Aponte Stauffer Goodson Boston Scruggs Stoltzfus Giron McCloud Titus Burnham Grubbs Redding ' +
+  'Tilley Hillman Luu Mosher Naranjo Henriquez Vergara Kerns Lombardo Brunner Corey Anders Reaves Iverson Monahan Beavers ' +
+  'Julian Ceballos Leary Burk Borden Nagy Chatman Carlos Antonio Tinsley Dawkins Sauer Elizondo Vann Trinh Sousa Mahan ' +
+  'Bartholomew Dowell Kellogg Horvath Whitmore Bianco Pantoja Negrete Hearn Thurston Pyle Guillory Chong Purdy Lentz ' +
+  'Delgadillo Fajardo Briones Her Armenta Dobbins Chester Banda Urbina Mattingly Beckman Solorzano Starkey Puente Isaacs ' +
+  'Brower Yazzie Boles Mares Wilburn Michaud Tejada Farrar Douglass Lundy Beebe Chavis Marion Schuler Unger Mojica ' +
+  'Demarco Hummel Almanza Monroy Harman Durbin Gaytan Baumann Silverman Knott Perales Francois Stclair Wakefield Kahn ' +
+  'Barth Parnell Noriega Stearns Nagel Lorenz Loomis Laws Centeno Roark Hostetler Herrington Higginbotham Carnes Tobias ' +
+  'Soria Limon Diggs Luong Resendiz Kelsey Echols Worthington Fournier Starnes Randle Reardon Coughlin Vick Jacques Heim ' +
+  'Staton Garay Lawler Bowser Harms Fierro Pederson Collazo McMahan Hershberger Mehta Mayberry Barger Stoddard Shelley ' +
+  'Newcomb Blackman Augustine Creech Tejeda Clemens Baughman Lombardi Weiner Mota Villasenor Gant Kong Kaminski Vanhorn ' +
+  'Lockett Elam Maier Gruber Angeles Trahan Irizarry Rapp Foss Daigle Burdick Weathers Winslow Whitten Deaton Seay ' +
+  'Squires Estep Arndt Satterfield Moua Fairchild Ouellette Sebastian Donohue Moeller Luther Lofton Kruger Renner Alves ' +
+  'Branham Pfeiffer Whipple Thibodeaux Strauss Braswell Heaton Linder Hills Hamby Callaway Ellsworth Mathew Lovelace ' +
+  'Valles Weller Upton Estrella Tharp Parrott Singletary Mateo Gunderson Coburn Minton Duenas Briscoe Lawton Sarmiento ' +
+  'Brinkley Keener Ferrara Chastain Manzo Sherrill Bonds Pruett Hitchcock Braden Devries Dowd Suggs Cheney Yancey ' +
+  'Morrissey Weinstein Jarrell Loyd Solorio Garvin Jaime Edmondson Bearden Roldan Hemphill Emmons Newberry Valerio ' +
+  'Trinidad Guajardo Aparicio Scherer Darden Tirado Rinehart Goetz Rhoads Layne Traylor Bales Jasso Stockton Graf Noonan ' +
+  'Pressley Felder Jameson Wahl Archuleta Myrick Kwon Byler Herrmann Yoo Vitale Loera Marlow Jeter Scales Segovia ' +
+  'Burleson Chiu Witherspoon Barfield Fabian Bouchard Chun Markham Zeigler Ulloa Leavitt Ely Martino Dubose Padron Damico ' +
+  'Condon Wiles Garibay Culp Santillan Westfall Lassiter Willett Graff Bachman Barkley Baltazar Salisbury Easter Redman ' +
+  'Salvador Schell Leggett Girard Gann Lytle Nobles Bolin Fuchs Radford Epstein Lipscomb Carreon Pease Regalado Oldham ' +
+  'Belanger Alcantar Looney Reich Epperson Aguayo Beaty Ricketts Cheatham Mabry Millard Shen Danielson Ebert Tubbs ' +
+  'Cardoza Andres Willingham Ragland Aiken Caron Snodgrass Babb Denney Jauregui Tavares Barone Pedraza Gillette Baggett ' +
+  'Messina Killian Angulo Amato Wendt Parris Hammonds Steinberg Breaux Wisniewski Guardado Benavidez Garber Lazo Lerma ' +
+  'Alcantara Houck Seitz Schubert Munguia Reddy Huntley Adcock Slade Matlock Longo Orlando Hein Trammell Guinn Caraballo ' +
+  'Baugh Shockley McCurdy Bertrand Spann Preciado Berrios Zelaya Smalls Clevenger Durant Bollinger Armendariz Denson ' +
+  'Mixon Geary Montiel Santamaria McAfee Foust Sisk Rockwell Ferraro Casper Cintron Overstreet Borges Concepcion Lemons ' +
+  'Matson Brinson Shelby Altamirano Swann Alicea Broughton Oglesby Caceres Braxton Lomeli Scarborough Dewey Alfonso ' +
+  'Nadeau Churchill Loya Ragsdale Brubaker Riggins Graber McCrary Farnsworth Herrick Talbert Hopson Gao Lantz Hamrick ' +
+  'Cornwell Nye Reis Milner Slone Spurlock Tolliver Almonte Razo Porras Moulton Duckworth Frantz Oreilly Bundy Bethea ' +
+  'Reinhardt Sam Guo Kimbrough Stoll Landrum Jett Streeter Christman Herr Falk Billingsley Chowdhury Pascual Qualls ' +
+  'Persaud Christianson Fortner Gilman Cecil Turpin Selby Fontaine Valladares Hannon Galvin Fraley Beckwith Beauchamp ' +
+  'Viera Moffett Stuckey Brumfield Lankford Cyr Bolanos Osullivan Delvalle Hite Arenas Tomlin Cardwell Milam Halverson ' +
+  'Speer Amaro McMillian Applegate Larue Hudgins Martins Bair Dorman Rains Smalley Lamar Holton Harlow Vue Marx Sommers ' +
+  'Kolb Morrell Havens Brice Soares Godoy Hildebrand Rawls Rao Mello Lyman Sommer McHenry Cason Faulk Bigelow Dockery ' +
+  'Thai Matias Spain Jain Cowart Brothers Alcaraz Pulliam Benner Nolasco Menendez Jacobo Branson Simpkins Ramon Whatley ' +
+  'Lewandowski Quinonez Cepeda Botello Grissom Cadena Cota Perrin McAdams Haro Keeler Perea Menard Ricci Burkholder ' +
+  'Poindexter Shackelford Ellington Krieger Troutman Tello Nielson Cary Irby Ruelas Grigsby Paulino Maciel Steffen ' +
+  'Blalock Levesque Forsythe Newby Lor Barbee Butterfield Franz Gooch Baumgartner Devore Hyman Wenzel Janssen Lauer ' +
+  'Gresham Fennell Schmid Grogan Rupp Breeden Gossett Roush Zamudio Mancini Sisson Choate Tolentino Yan McNeely Corrales ' +
+  'Murrell Fultz Harlan Lindquist Gooden Rodas Shuler Cardoso Nettles Burdette Villagomez Apodaca Royer Colby Hammons ' +
+  'Pemberton Wellman Gaspar Paulsen Castellano Stanfield Bronson Ruvalcaba Newsom Shipp Dao Brockman Nino Lenz Noe Bunn ' +
+  'Kopp Snowden Martell Bruns Boyles Camarena Moe Herzog Kiefer Ayres Ezell Switzer Pardo Eller Kroll Rivero Sauceda ' +
+  'Zielinski Ragan Bostic Krebs Camarillo Urena Seeley Wyman Grooms Beers Barba Freitas Byrnes Estevez Alanis Keefe ' +
+  'Llamas Brackett Leahy Mortensen Domingo Palumbo Hartmann Pino Needham Tsai Nagle Sifuentes Hamel Landeros Pedroza ' +
+  'Morey Larios Dees Carvalho Miguel Elrod McLemore Kuntz Pak Otoole Hardwick Skidmore Seibert Worrell Briseno Nolen ' +
+  'Hardesty Pauley Haddad Reiter Dunaway Robins Laney Custer Gaither Vicente Wolford Danner Gatlin Salcido Wilde Somers ' +
+  'Delagarza McCloskey Mendiola Medlin Boehm Drury Horan Christenson Arana Beaulieu Feng Stowe Olguin Toro Kitchens Libby ' +
+  'Clawson Crider Newkirk Montenegro Gulley Maples Galarza Wenger Zeller Carbone Maxey Narvaez Peng Pichardo Stepp Florez ' +
+  'Terrazas Ahn McIntire Pullen Phelan Schrock Hiller Iglesias Bayer Sager Kinder Koontz Cedillo Villatoro Oshea Kimmel ' +
+  'Conti Turley Behrens Acker Crist Kemper Broderick Waldrop Lemke Snead Seifert Ratcliff Flannery Olivo Serrato Ambriz ' +
+  'Gandy Sales Fogle Paez Jin Brinkman Conde Monson Etheridge Vieira Griswold Gaskins McClanahan Westmoreland Seward Chao ' +
+  'Poston Anglin Severson Windham Comstock Hubert Grantham Fugate Noll McMillen Garnett Healey Burge Aldana Kozlowski ' +
+  'Turk Reichert Deguzman Paniagua Dupont Venable Higgs Karr Bagwell Wicker Liles Marvin Quinlan Cosby Barksdale Tisdale ' +
+  'Meador Sikes Peyton Rojo Ballesteros Lindley Caputo Luciano Hiatt Israel Searcy Logsdon Culbertson Glaser Weems Leger ' +
+  'Leigh Mendenhall Hollins Dorn Tavarez Sowers Andrus Glick Everhart Deluna Ahrens Chapin Niles Lanham Mendes Weiler ' +
+  'Lindberg Valdovinos Murry Colwell Earley Culpepper Broome Barreto Correia McDuffie Betz Tice Desantis Tafoya Pfeifer ' +
+  'Boudreau Mattox Isom Montez Martens Joshi Moffitt Schweitzer Kasper Caro Vines Dehart Perdomo Eggleston Shi Bills ' +
+  'Allard Kirchner Faber Calvillo Sanborn Harter Mauldin Nilson Blaylock Moriarty Luo Colburn '
+).trim().split(' ');
 const CAP_I = new Set(["i", "i'm", "i'll", "i've", "i'd"]);
 const CAP_ABBR = new Set(['e.g', 'i.e', 'etc', 'vs', 'mr', 'mrs', 'ms', 'dr', 'prof', 'approx', 'cf', 'no', 'st']);
 // Mc… / Mac… words: the letter after the prefix is a capital (McGregor, MacLean), except everyday words like machine or macro
@@ -1154,8 +1412,17 @@ function macCase(low) {
   if (!m || MAC_WORDS.has(low)) return null;
   return m[1][0].toUpperCase() + m[1].slice(1) + m[2][0].toUpperCase() + m[2].slice(1);
 }
+// Your own names, as they should look: the built-in surnames, then a note whose first line is "Names", then the Settings box.
+function namesFromNote() {
+  if (capNoteNames) return capNoteNames;
+  const n = notes.find(x => !x.trashed && /^names\s*$/i.test((x.text || '').split('\n')[0].trim()));
+  capNoteNames = (n ? n.text.split('\n').slice(1).filter(l => !/^\s*>/.test(l)).join(',') : '').split(/[,\n]/).map(w => w.trim()).filter(Boolean);
+  return capNoteNames;
+}
 function capExtra() {
-  const m = new Map();
+  if (!capPublic) capPublic = CAP_SURNAMES.map(w => [w.toLowerCase(), w]);
+  const m = new Map(capPublic);
+  namesFromNote().forEach(w => m.set(w.toLowerCase(), w));
   (localStorage.getItem('nt_cap_x') || '').split(/[,\n]/).forEach(w => { w = w.trim(); if (w) m.set(w.toLowerCase(), w); });
   return m;
 }
