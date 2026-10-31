@@ -1,4 +1,4 @@
--- Full schema for Note. Safe to run more than once. The folders and Trash parts are also kept on their own in
+-- Full schema for Note. Safe to run more than once. The folders and Bin parts are also kept on their own in
 -- shell-apps/core/sql/002_folders.sql and 003_trash.sql (run those alone if the notes table already exists).
 
 -- Run once in the Supabase SQL editor (project "Apps").
@@ -61,8 +61,8 @@ $$;
 
 -- Until this has been run, notes keep syncing as before; a note you delete is simply not marked as trashed on other devices.
 
--- When a note was moved to the Trash (epoch seconds). 0 = not in the Trash; null = written by an older client that
--- doesn't know about the Trash (the server then keeps the value it already has).
+-- When a note was moved to the Bin (epoch seconds). 0 = not in the Bin; null = written by an older client that
+-- doesn't know about the Bin (the server then keeps the value it already has).
 alter table quick_notes add column if not exists trashed bigint;
 
 create or replace function upsert_quick_notes(p_code text, p_notes jsonb)
