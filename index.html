@@ -50,6 +50,26 @@
     .search::placeholder { color: var(--dim); }
 
     #list { flex: 1; overflow-y: auto; padding: 8px 18px calc(110px + env(safe-area-inset-bottom)); }
+    /* long-press must not highlight text or pop the iOS callout, except where you're actually editing */
+    html, body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    #ed-text, input, textarea { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+    .swipe { position: relative; margin-bottom: 10px; border-radius: var(--r); overflow: hidden; touch-action: pan-y; }
+    .swipe .card { position: relative; margin-bottom: 0; transition: transform .22s ease; will-change: transform; }
+    .swipe.dragging .card { transition: none; }
+    .swipe-bg { position: absolute; inset: 0; display: none; align-items: center; padding: 0 22px; font-weight: 700; font-size: 15px; color: #fff; }
+    .swipe-bg.right { justify-content: flex-start; } .swipe-bg.left { justify-content: flex-end; }
+    .swipe-bg.on { display: flex; }
+    .swipe-bg.soft { opacity: .55; }
+    .swipe-bg.act-pin { background: var(--accent); color: var(--accent-ink); }
+    .swipe-bg.act-delete { background: #d64545; }
+    .swipe-bg.act-move { background: #3b82f6; }
+    .swipe-bg.act-unfile { background: #6b7280; }
+    .swipe-bg.act-duplicate { background: #2fa66a; }
+    .swipe-bg.act-share { background: #8b5cf6; }
+    .swipe-bg.act-none { background: var(--surface2); color: var(--dim); }
+    .swipe-opts { display: flex; flex-direction: column; gap: 14px; }
+    .field select { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text);
+      font-size: 16px; padding: 12px 14px; width: 100%; -webkit-appearance: none; appearance: none; }
     .section { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
       color: var(--dim); margin: 16px 2px 8px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
@@ -228,7 +248,7 @@
 <!-- ── SETTINGS ─────────────────────────────────── -->
 <div id="settings-screen" class="screen">
   <div class="set-title">Note</div>
-  <p class="set-sub">Syncs with the Notes widget on your desktop.</p>
+  <p class="set-sub">Syncs with the Note app on your desktop.</p>
   <div class="field">
     <label>Notes Code</label>
     <input id="s-code" type="text" placeholder="NOTES_CODE from task-sync.conf"
@@ -241,6 +261,17 @@
       <button data-size="medium" onclick="setFmtSize('medium')">Medium</button>
       <button data-size="large" onclick="setFmtSize('large')">Large</button>
     </div>
+  </div>
+  <div class="field">
+    <label>Swipe gestures on a note</label>
+    <p class="set-sub" style="margin:0 0 8px">Short = about a thumb's width. Long = most of the way across.</p>
+    <div class="swipe-opts">
+      <div class="field"><label>Swipe right, short</label><select id="sw-rightShort" onchange="saveSwipe()"></select></div>
+      <div class="field"><label>Swipe right, long</label><select id="sw-rightLong" onchange="saveSwipe()"></select></div>
+      <div class="field"><label>Swipe left, short</label><select id="sw-leftShort" onchange="saveSwipe()"></select></div>
+      <div class="field"><label>Swipe left, long</label><select id="sw-leftLong" onchange="saveSwipe()"></select></div>
+    </div>
+    <button class="btn ghost" style="margin-top:12px" onclick="resetSwipe()">Reset swipes to default</button>
   </div>
   <button class="btn" onclick="saveSettings()">Connect</button>
   <button class="btn ghost" onclick="refreshApp()">Refresh app</button>
@@ -359,20 +390,146 @@ function renderList() {
       : `<div class="empty"><b>Nothing here yet</b>Tap + to write a note in this folder.</div>`;
     return;
   }
-  const card = n => `<div class="card${n.pinned ? ' pinned' : ''}" data-id="${esc(n.id)}">
+  const card = n => `<div class="swipe" data-id="${esc(n.id)}"><div class="swipe-bg right"></div><div class="swipe-bg left"></div><div class="card${n.pinned ? ' pinned' : ''}" data-id="${esc(n.id)}">
       <div class="card-title">${view === '*' && folderOf(n) ? `<span class="card-folder">${esc(getFolder(folderOf(n)).name)}</span>` : ''}${esc(boxes(title(n)))}</div>
       ${preview(n) ? `<div class="card-prev">${esc(preview(n))}</div>` : ''}
       <div class="card-time">${esc(relTime(n.updated))}</div>
-    </div>`;
+    </div></div>`;
   const pinned = list.filter(n => n.pinned), rest = list.filter(n => !n.pinned);
   el.innerHTML =
     (pinned.length ? `<div class="section">Pinned</div>` + pinned.map(card).join('') : '') +
     (rest.length ? (pinned.length ? `<div class="section">Notes</div>` : '') + rest.map(card).join('') : '');
 }
 document.getElementById('list').addEventListener('click', e => {
+  if (Date.now() - swipeEndedAt < 400) return;            // the tap that ends a swipe isn't a tap
   const c = e.target.closest('.card');
   if (c) openEditor(c.dataset.id);
 });
+
+// ── SWIPE GESTURES ────────────────────────────────────
+// Dragging a note sideways reveals an action; letting go past the SHORT or LONG distance runs it. What each of the
+// four (right/left x short/long) does is a setting.
+const SWIPE_ACTIONS = { none: 'Nothing', pin: 'Pin / unpin', delete: 'Delete', move: 'Move to folder',
+  unfile: 'Remove from folder', duplicate: 'Duplicate', share: 'Share' };
+const SWIPE_DEFAULTS = { rightShort: 'pin', rightLong: 'none', leftShort: 'none', leftLong: 'delete' };
+let swipeCfg = Object.assign({}, SWIPE_DEFAULTS);
+try { Object.assign(swipeCfg, JSON.parse(localStorage.getItem('nt_swipe') || '{}')); } catch {}
+for (const k in swipeCfg) if (!(swipeCfg[k] in SWIPE_ACTIONS)) swipeCfg[k] = SWIPE_DEFAULTS[k];
+const SWIPE_SHORT_PX = 72;
+const swipeLongPx = w => Math.max(190, w * 0.55);
+let swipeEndedAt = 0;
+
+function swipeTier(dx, width) {                     // -> { dir, tier, action }; tier '' = not far enough
+  const dir = dx > 0 ? 'right' : 'left', a = Math.abs(dx);
+  const tier = a >= swipeLongPx(width) ? 'Long' : a >= SWIPE_SHORT_PX ? 'Short' : '';
+  return { dir, tier, action: tier ? swipeCfg[dir + tier] : 'none' };
+}
+
+function pinNote(id) {
+  const n = getNote(id); if (!n) return;
+  n.pinned = !n.pinned; n.updated = Math.max(now(), n.updated + 1);
+  saveState(); renderList(); scheduleSync();
+  showToast(n.pinned ? 'Pinned' : 'Unpinned');
+}
+function deleteNote(id) {
+  const n = getNote(id); if (!n) return;
+  const copy = Object.assign({}, n);
+  removeNote(id);
+  renderList();
+  showToast('Deleted', () => {   // undo: a fresh `updated` beats the tombstone everywhere
+    copy.updated = Math.max(now(), (deleted[copy.id] || 0) + 1);
+    notes.push(copy); delete deleted[copy.id];
+    saveState(); renderList(); scheduleSync();
+  });
+}
+function duplicateNote(id) {
+  const n = getNote(id); if (!n) return;
+  notes.unshift({ id: 'n-' + Date.now() + '-' + Math.floor(Math.random() * 1e6), text: n.text, pinned: false, updated: now(), folder: n.folder || '' });
+  saveState(); renderList(); scheduleSync();
+  showToast('Duplicated');
+}
+function shareNote(id) {
+  const n = getNote(id); if (!n) return;
+  if (navigator.share) navigator.share({ title: title(n), text: n.text }).catch(() => {});
+  else if (navigator.clipboard) navigator.clipboard.writeText(n.text).then(() => showToast('Copied'), () => showToast("Couldn't copy"));
+}
+function runSwipeAction(action, id) {
+  if (action === 'pin') pinNote(id);
+  else if (action === 'delete') deleteNote(id);
+  else if (action === 'move') openMoveSheet(id);
+  else if (action === 'unfile') { if (moveNote(id, '')) { renderList(); showToast('Removed from folder'); } }
+  else if (action === 'duplicate') duplicateNote(id);
+  else if (action === 'share') shareNote(id);
+}
+
+(function () {
+  const list = document.getElementById('list');
+  let sw = null;
+  const bgs = el => ({ right: el.querySelector('.swipe-bg.right'), left: el.querySelector('.swipe-bg.left') });
+  function paint(dx) {
+    const t = swipeTier(dx, sw.w), b = bgs(sw.el);
+    sw.card.style.transform = 'translateX(' + Math.max(-sw.w, Math.min(sw.w, dx)) + 'px)';
+    b.right.classList.remove('on'); b.left.classList.remove('on');
+    const side = b[t.dir];
+    // before the first threshold, preview the first action that is set for this direction
+    let action = t.action, soft = false;
+    if (!t.tier) { action = swipeCfg[t.dir + 'Short'] !== 'none' ? swipeCfg[t.dir + 'Short'] : swipeCfg[t.dir + 'Long']; soft = true; }
+    side.className = 'swipe-bg ' + t.dir + ' on act-' + action + (soft ? ' soft' : '');
+    side.textContent = action === 'none' ? '' : SWIPE_ACTIONS[action];
+  }
+  function finish(cancelled) {
+    if (!sw) return;
+    const s = sw; sw = null;
+    s.el.classList.remove('dragging');
+    if (s.locked !== 'x') return;
+    swipeEndedAt = Date.now();
+    const t = swipeTier(s.dx, s.w);
+    const reset = () => { s.card.style.transform = ''; const b = bgs(s.el); b.right.classList.remove('on'); b.left.classList.remove('on'); };
+    if (cancelled || t.action === 'none') { reset(); return; }
+    if (t.action === 'delete') {            // slide it away, then delete
+      s.card.style.transform = 'translateX(' + (t.dir === 'right' ? s.w : -s.w) + 'px)';
+      setTimeout(() => runSwipeAction('delete', s.id), 180);
+    } else { reset(); runSwipeAction(t.action, s.id); }
+  }
+  list.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const el = e.target.closest('.swipe'); if (!el) return;
+    sw = { el, card: el.querySelector('.card'), x: e.clientX, y: e.clientY, dx: 0, locked: null, id: el.dataset.id, w: el.offsetWidth || 360, pid: e.pointerId };
+  });
+  list.addEventListener('pointermove', e => {
+    if (!sw || e.pointerId !== sw.pid) return;
+    const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+    if (sw.locked === null) {                // decide once: sideways swipe or ordinary scroll
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      sw.locked = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+      if (sw.locked === 'x') { sw.el.classList.add('dragging'); try { list.setPointerCapture(e.pointerId); } catch {} }
+    }
+    if (sw.locked !== 'x') return;
+    sw.dx = dx; paint(dx);
+  });
+  list.addEventListener('pointerup', e => { if (sw && e.pointerId === sw.pid) finish(false); });
+  list.addEventListener('pointercancel', e => { if (sw && e.pointerId === sw.pid) finish(true); });
+  list.addEventListener('contextmenu', e => e.preventDefault());    // no callout menu on a long press in the list
+})();
+// text can only be selected where you edit it (CSS handles most of it; this covers the rest)
+document.addEventListener('selectstart', e => {
+  const t = e.target.nodeType === 3 ? e.target.parentElement : e.target;
+  if (!t || !t.closest || !t.closest('#ed-text, input, textarea')) e.preventDefault();
+});
+
+function initSwipeSettings() {
+  for (const k in swipeCfg) {
+    const sel = document.getElementById('sw-' + k);
+    sel.innerHTML = Object.entries(SWIPE_ACTIONS).map(([v, label]) => `<option value="${v}">${label}</option>`).join('');
+    sel.value = swipeCfg[k];
+  }
+}
+function saveSwipe() {
+  for (const k in swipeCfg) swipeCfg[k] = document.getElementById('sw-' + k).value;
+  localStorage.setItem('nt_swipe', JSON.stringify(swipeCfg));
+}
+function resetSwipe() { Object.assign(swipeCfg, SWIPE_DEFAULTS); localStorage.setItem('nt_swipe', JSON.stringify(swipeCfg)); initSwipeSettings(); showToast('Swipes reset'); }
+initSwipeSettings();
 
 // ── EDITOR ────────────────────────────────────────────
 let editTimer = null, lastInput = 0;
@@ -722,16 +879,11 @@ function togglePin() {
 }
 function deleteCurrent() {
   flushEdit();
-  const n = getNote(currentId); if (!n) return;
-  const copy = Object.assign({}, n);
-  removeNote(currentId);
+  const id = currentId;
+  if (!getNote(id)) return;
   currentId = null;
-  renderList(); showScreen('list-screen');
-  showToast('Deleted', () => {   // undo: a fresh `updated` beats the tombstone everywhere
-    copy.updated = Math.max(now(), (deleted[copy.id] || 0) + 1);
-    notes.push(copy); delete deleted[copy.id];
-    saveState(); renderList(); scheduleSync();
-  });
+  showScreen('list-screen');
+  deleteNote(id);
 }
 // ── FOLDERS ───────────────────────────────────────────
 function newFolder(thenMove) {
@@ -774,10 +926,13 @@ function moveNote(id, folderId) {
   saveState(); scheduleSync();
   return true;
 }
-function openMoveSheet() {
-  if (!currentId) return;
-  flushEdit();
-  const cur = folderOf(getNote(currentId));
+let sheetFor = null;                                    // the note the move sheet is for (the open one, or a swiped one)
+function openMoveSheet(id) {
+  const nid = typeof id === 'string' ? id : currentId;
+  if (!nid || !getNote(nid)) return;
+  if (nid === currentId) flushEdit();
+  sheetFor = nid;
+  const cur = folderOf(getNote(nid));
   const row = (fid, name, cls) => `<button class="sheet-row ${cls || ''}" data-fid="${esc(fid)}">${esc(name)}${cur === fid && !cls ? '<span class="tick">✓</span>' : ''}</button>`;
   document.getElementById('sheet-card').innerHTML = '<div class="sheet-title">Move to folder</div>' + (cur ? row('', 'Remove from folder') : '') +
     sortedFolders().map(f => row(f.id, f.name)).join('') + `<button class="sheet-row new" data-new="1">＋ New folder…</button>`;
@@ -789,8 +944,8 @@ document.getElementById('sheet-card').addEventListener('click', e => {
   let fid = b.dataset.fid;
   if (b.dataset.new) { fid = newFolder(true); if (fid === null) return; }
   closeSheet();
-  if (moveNote(currentId, fid)) showToast(fid ? 'Moved to ' + getFolder(fid).name : 'Removed from folder');
-  paintEditorMeta();
+  if (moveNote(sheetFor, fid)) showToast(fid ? 'Moved to ' + getFolder(fid).name : 'Removed from folder');
+  if (sheetFor === currentId) paintEditorMeta(); else renderList();
 });
 
 function removeNote(id, quiet) {
