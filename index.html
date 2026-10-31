@@ -226,7 +226,7 @@
 <div id="list-screen" class="screen">
   <div class="top">
     <div class="top-row">
-      <div class="big-title">Notes</div>
+      <div class="big-title">Note</div>
       <div class="top-actions">
         <button class="icon-btn" onclick="syncNow(true)" title="Sync" aria-label="Sync" style="width:auto;padding:0 8px;border-radius:20px">
           <span class="dot" id="dot"></span>
@@ -444,7 +444,7 @@ document.getElementById('chips').addEventListener('click', e => {
 function renderList() {
   validateView();
   renderChips();
-  document.querySelector('.big-title').textContent = view === TRASH ? 'Bin' : 'Notes';
+  document.querySelector('.big-title').textContent = view === TRASH ? 'Bin' : 'Note';
   const q = document.getElementById('search').value.trim().toLowerCase();
   let list = notesInView();
   if (q) list = list.filter(n => (n.text || '').toLowerCase().includes(q));
