@@ -1028,6 +1028,35 @@ edEl().addEventListener('paste', e => {
   else document.execCommand('insertText', false, t);
   onEdit();
 });
+// Browsers don't follow links inside editable text (a tap just places the cursor), so a tap on a link opens it — both real
+// links (the toolbar button or [text](url)) and a web address that is only plain text (pasted URLs stay plain text).
+function openUrl(url) {
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.style.display = 'none';
+  document.body.appendChild(a); a.click(); a.remove();               // a real link click: opens in Safari from the home-screen app too
+}
+function urlAtPoint(x, y) {                                           // the web address (in plain text) under a tap, or null
+  let node = null, off = 0;
+  if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(x, y); if (p) { node = p.offsetNode; off = p.offset; } }
+  else if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(x, y); if (r) { node = r.startContainer; off = r.startOffset; } }
+  if (!node || node.nodeType !== 3 || !edEl().contains(node)) return null;
+  const re = /https?:\/\/[^\s<>"']+/gi; let m;
+  while ((m = re.exec(node.data))) {
+    const url = m[0].replace(/[.,;:!?)\]]+$/, '');                    // not the sentence's own punctuation
+    if (off > m.index && off < m.index + url.length) return url;      // strictly inside it: a tap at either end just places the cursor
+  }
+  return null;
+}
+edEl().addEventListener('click', e => {
+  if (e.defaultPrevented) return;
+  const sel = getSelection();
+  if (sel && !sel.isCollapsed) return;                                // finishing a text selection is not a tap
+  const a = e.target.closest && e.target.closest('a[href]');
+  const url = a ? a.getAttribute('href') : urlAtPoint(e.clientX, e.clientY);
+  if (!url || !/^https?:\/\//i.test(url)) return;                    // only web links, never javascript: and the like
+  e.preventDefault();
+  openUrl(url);
+});
 // Tap the box of a checklist item to tick it.
 edEl().addEventListener('click', e => {
   const li = e.target.closest && e.target.closest('li[data-chk]');
