@@ -1105,6 +1105,31 @@ function closeEditor() {
   renderList();
   showScreen('list-screen');
 }
+// A swipe in from the left edge goes back to the list (like the iOS back gesture).
+(function () {
+  const es = document.getElementById('editor-screen');
+  let g = null;
+  es.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    g = e.touches.length === 1 && t.clientX <= 24 ? { x: t.clientX, y: t.clientY, dx: 0, on: false } : null;
+  }, { passive: true });
+  es.addEventListener('touchmove', e => {
+    if (!g) return;
+    const t = e.touches[0];
+    g.dx = t.clientX - g.x;
+    const dy = t.clientY - g.y;
+    if (!g.on && Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(dy) * 1.5) g.on = true;
+    else if (!g.on && Math.abs(dy) > 14) g = null;                 // it's a scroll
+    if (g && g.on && e.cancelable) e.preventDefault();             // no text selection / browser back while swiping
+  }, { passive: false });
+  es.addEventListener('touchend', () => {
+    const done = g && g.on && g.dx > 70;
+    g = null;
+    if (done) closeEditor();
+  });
+  es.addEventListener('touchcancel', () => { g = null; });
+})();
+
 // The ⋯ menu in the editor: plain text items instead of icons.
 function closeEdMenu() { document.getElementById('ed-menu').classList.remove('show'); document.getElementById('ed-menu-bg').classList.remove('show'); }
 function toggleEdMenu(e) {
