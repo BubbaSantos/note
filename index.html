@@ -219,6 +219,26 @@
       background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 18px;
       border-radius: 20px; font-size: 14px; opacity: 0; pointer-events: none; transition: all .2s; z-index: 50; }
     #toast.show { pointer-events: auto; opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── ANIMATIONS (Settings → Animations switches them off: html.no-anim) ── */
+    .screen.xfer { position: fixed; inset: 0; width: 100%; }
+    .screen.xfer.top { z-index: 3; box-shadow: -14px 0 34px rgba(0,0,0,.55); }
+    @keyframes cardIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    #list.stagger .swipe { animation: cardIn .34s cubic-bezier(.2,.8,.2,1) backwards; }
+    #list.stagger .swipe:nth-child(2) { animation-delay: 30ms; } #list.stagger .swipe:nth-child(3) { animation-delay: 60ms; }
+    #list.stagger .swipe:nth-child(4) { animation-delay: 90ms; } #list.stagger .swipe:nth-child(5) { animation-delay: 120ms; }
+    #list.stagger .swipe:nth-child(6) { animation-delay: 150ms; } #list.stagger .swipe:nth-child(n+7) { animation-delay: 180ms; }
+    @keyframes popIn { from { opacity: 0; transform: scale(.9) translateY(-6px); } to { opacity: 1; transform: none; } }
+    .ed-menu.show { transform-origin: top right; animation: popIn .16s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: none; } }
+    .sheet.show { animation: fadeIn .2s ease-out; }
+    .sheet.show .sheet-card { animation: slideUp .3s cubic-bezier(.2,.8,.2,1); }
+    @keyframes fabIn { from { transform: scale(.5); opacity: 0; } to { transform: none; opacity: 1; } }
+    #list-screen.active #fab { animation: fabIn .34s .12s cubic-bezier(.3,1.5,.5,1) backwards; }
+    #fab, .icon-btn, .chip, .btn, .back { transition: transform .12s ease, background-color .15s ease, border-color .15s ease; }
+    .icon-btn:active, .chip:active, .btn:active { transform: scale(.94); }
+    html.no-anim *, html.no-anim *::before, html.no-anim *::after { animation: none !important; transition: none !important; }
   </style>
 </head>
 <body>
@@ -317,6 +337,14 @@
     </select>
     <p class="set-sub" style="margin:8px 0 0">Applies when you move a note out of the folder you're viewing, by the folder button, a swipe or dragging it.</p>
   </div>
+  <div class="field">
+    <label>Animations</label>
+    <select id="anim-on" onchange="saveAnim()">
+      <option value="1">On</option>
+      <option value="0">Off</option>
+    </select>
+    <p class="set-sub" style="margin:8px 0 0">Slide and peel between pages, cards and menus easing in.</p>
+  </div>
   <button class="fold-link" id="bin-row" onclick="openBin()"><span>Bin</span><span class="state" id="bin-count"></span></button>
   <details class="fold" id="sync-details">
     <summary>Sync<span class="state" id="sync-state"></span></summary>
@@ -408,14 +436,48 @@ const daysLeft = (n, at = now()) => Math.max(0, Math.ceil((n.trashed + TRASH_DAY
 const notesInView = () => view === TRASH ? trashedNotes() : sortedNotes().filter(n => view === '*' || folderOf(n) === view);
 function openBin() { setView(TRASH, true); showScreen('list-screen'); renderList(); }      // from Settings
 function closeBin() { setView('*'); }
-function setView(v, quiet) { view = v; localStorage.setItem('nt_view', v); if (!quiet) renderList(); }
+function setView(v, quiet) { view = v; localStorage.setItem('nt_view', v); if (!quiet) { renderList(); staggerList(); } }
 function validateView() { if (view !== '*' && view !== TRASH && !getFolder(view)) setView('*', true); }   // All notes + Trash are the built-in views; unfiled notes live in All
 const sortedNotes = () => notes.filter(n => !n.trashed).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updated - a.updated);
 
 // ── SCREENS ───────────────────────────────────────────
-function showScreen(id) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+// Moving between screens slides the new one in over the old (which drifts back and dims), like a navigation stack.
+const animOn = () => localStorage.getItem('nt_anim') !== '0';        // setting: animations (default on)
+const applyAnim = () => document.documentElement.classList.toggle('no-anim', !animOn());
+function saveAnim() { localStorage.setItem('nt_anim', document.getElementById('anim-on').value); applyAnim(); }
+applyAnim();
+const SCREEN_DEPTH = { 'list-screen': 0, 'editor-screen': 1, 'settings-screen': 1 };
+let navDone = null;
+function finishNav() { if (navDone) { const f = navDone; navDone = null; f(); } }
+function showScreen(id, instant) {
+  finishNav();
+  const prev = document.querySelector('.screen.active'), next = document.getElementById(id);
+  const settle = () => {
+    document.querySelectorAll('.screen').forEach(s => { s.classList.remove('xfer', 'top'); if (s !== next) s.classList.remove('active'); });
+    next.classList.add('active');
+  };
+  if (instant || !animOn() || !prev || prev === next || !next.animate) { settle(); return; }
+  const fwd = (SCREEN_DEPTH[id] || 0) > (SCREEN_DEPTH[prev.id] || 0);
+  const top = fwd ? next : prev, under = fwd ? prev : next;
+  prev.classList.add('xfer'); next.classList.add('xfer', 'active'); top.classList.add('top');
+  const opt = { duration: 340, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' };
+  const away = [{ transform: 'none', filter: 'brightness(1)' }, { transform: 'translateX(-28%)', filter: 'brightness(.55)' }];
+  const anims = [
+    top.animate(fwd ? [{ transform: 'translateX(100%)' }, { transform: 'none' }] : [{ transform: 'none' }, { transform: 'translateX(100%)' }], opt),
+    under.animate(fwd ? away : away.slice().reverse(), opt),
+  ];
+  const end = () => { anims.forEach(a => a.cancel()); settle(); };
+  navDone = end;
+  const done = () => { if (navDone === end) { navDone = null; end(); } };
+  anims[0].finished.then(done).catch(() => {});
+  setTimeout(done, opt.duration + 80);          // and regardless, in case the browser never ticks the animation (a hidden tab)
+}
+// Cards drift up one after another when the list is (re)filled for a new view
+function staggerList() {
+  if (!animOn()) return;
+  const l = document.getElementById('list');
+  l.classList.add('stagger'); clearTimeout(staggerList._t);
+  staggerList._t = setTimeout(() => l.classList.remove('stagger'), 700);
 }
 function showToast(msg, undo) {
   const t = document.getElementById('toast');
@@ -1103,7 +1165,7 @@ if (window.visualViewport) {
 }
 try { document.execCommand('defaultParagraphSeparator', false, 'div'); } catch (e) {}
 
-function closeEditor() {
+function closeEditor(instant) {
   closeEdMenu();
   flushEdit();
   const n = getNote(currentId);
@@ -1111,31 +1173,73 @@ function closeEditor() {
   if (n && !n.text.trim()) removeNote(n.id, true);
   currentId = null;
   renderList();
-  showScreen('list-screen');
+  showScreen('list-screen', instant === true);
 }
-// A swipe in from the left edge goes back to the list (like the iOS back gesture).
+// A swipe in from the left edge peels the note back to reveal the list (like the iOS back gesture). The note follows the
+// finger, tilting up off the page with a shadow, while the list underneath slides and brightens into place.
 (function () {
-  const es = document.getElementById('editor-screen');
+  const es = document.getElementById('editor-screen'), ls = document.getElementById('list-screen');
   let g = null;
+  const W = () => window.innerWidth;
+  function paint(dx) {
+    const p = Math.max(0, Math.min(1, dx / W()));
+    es.style.transform = 'perspective(1100px) translateX(' + Math.max(0, dx) + 'px) rotateY(' + (-p * 12) + 'deg)';
+    es.style.boxShadow = '-18px 0 44px rgba(0,0,0,' + (.35 + .3 * p) + ')';
+    es.style.borderRadius = Math.round(22 * Math.min(1, p * 4)) + 'px 0 0 ' + Math.round(22 * Math.min(1, p * 4)) + 'px';
+    ls.style.transform = 'translateX(' + (-28 * (1 - p)) + '%)';
+    ls.style.filter = 'brightness(' + (.55 + .45 * p) + ')';
+  }
+  function begin() {
+    finishNav(); flushEdit();
+    g.base = es.style.transform;
+    es.style.transformOrigin = 'left center';
+    ls.classList.add('xfer', 'active'); es.classList.add('xfer', 'top');
+    es.style.boxShadow = '-18px 0 44px rgba(0,0,0,.35)';
+    g.peel = true;
+  }
+  function clean(keepList) {
+    es.style.transformOrigin = ''; es.style.boxShadow = ''; es.style.borderRadius = ''; es.style.transform = g ? g.base : '';
+    ls.style.transform = ''; ls.style.filter = '';
+    es.classList.remove('xfer', 'top'); ls.classList.remove('xfer');
+    if (!keepList) ls.classList.remove('active');
+  }
   es.addEventListener('touchstart', e => {
     const t = e.touches[0];
-    g = e.touches.length === 1 && t.clientX <= 24 ? { x: t.clientX, y: t.clientY, dx: 0, on: false } : null;
+    g = e.touches.length === 1 && t.clientX <= 24 ? { x: t.clientX, y: t.clientY, dx: 0, on: false, peel: false, t: performance.now() } : null;
   }, { passive: true });
   es.addEventListener('touchmove', e => {
     if (!g) return;
     const t = e.touches[0];
     g.dx = t.clientX - g.x;
     const dy = t.clientY - g.y;
-    if (!g.on && Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(dy) * 1.5) g.on = true;
+    if (!g.on && Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(dy) * 1.5) { g.on = true; g.t = performance.now(); g.x0 = g.dx; if (animOn()) begin(); }
     else if (!g.on && Math.abs(dy) > 14) g = null;                 // it's a scroll
     if (g && g.on && e.cancelable) e.preventDefault();             // no text selection / browser back while swiping
+    if (g && g.peel) paint(g.dx);
   }, { passive: false });
   es.addEventListener('touchend', () => {
-    const done = g && g.on && g.dx > 70;
-    g = null;
-    if (done) closeEditor();
+    const k = g; g = null;
+    if (!k || !k.on) return;
+    const vel = (k.dx - k.x0) / Math.max(1, performance.now() - k.t);   // px per ms
+    const done = k.dx > (k.peel ? W() * .35 : 70) || (vel > .6 && k.dx > 40);
+    if (!k.peel) { if (done) closeEditor(); return; }
+    const from = es.style.transform, to = done ? 'perspective(1100px) translateX(' + W() + 'px) rotateY(-12deg)' : 'perspective(1100px) translateX(0px) rotateY(0deg)';
+    const lsTo = done ? 'none' : 'translateX(-28%)';
+    const a = es.animate([{ transform: from }, { transform: to }], { duration: done ? 220 : 260, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' });
+    ls.animate([{ transform: ls.style.transform || 'none', filter: ls.style.filter || 'none' }, { transform: lsTo, filter: done ? 'brightness(1)' : 'brightness(.55)' }],
+      { duration: done ? 220 : 260, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' });
+    let finished = false;
+    const fin = () => {
+      if (finished) return; finished = true;
+      es.getAnimations().concat(ls.getAnimations()).forEach(x => x.cancel());
+      k.base = k.base || '';
+      g = k; clean(done); g = null;
+      if (done) closeEditor(true);
+    };
+    a.finished.then(fin).catch(fin);
+    setTimeout(fin, (done ? 220 : 260) + 80);
   });
-  es.addEventListener('touchcancel', () => { g = null; });
+  es.addEventListener('touchcancel', () => { if (g && g.peel) clean(false); g = null; });
 })();
 
 // The ⋯ menu in the editor: plain text items instead of icons.
@@ -1281,6 +1385,7 @@ function openSettings() {
   const bin = trashedNotes().length;
   document.getElementById('bin-count').textContent = bin ? bin + ' note' + (bin === 1 ? '' : 's') : 'Empty';
   document.getElementById('follow-move').value = followMove() ? '1' : '0';
+  document.getElementById('anim-on').value = animOn() ? '1' : '0';
   showScreen('settings-screen');
 }
 function saveFollow() { localStorage.setItem('nt_follow', document.getElementById('follow-move').value); }
@@ -1445,7 +1550,7 @@ async function refreshApp() {
 
 // ── START ─────────────────────────────────────────────
 loadConfig(); loadState(); purgeTrash();
-renderList();
+renderList(); staggerList();
 if (isConfigured()) { showScreen('list-screen'); syncNow(false); }
 else openSettings();
 setInterval(() => { if (document.visibilityState === 'visible' && isConfigured()) syncNow(false); }, 8000);
