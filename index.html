@@ -338,6 +338,23 @@
     <p class="set-sub" style="margin:8px 0 0">Applies when you move a note out of the folder you're viewing, by the folder button, a swipe or dragging it.</p>
   </div>
   <div class="field">
+    <label>Capitalise sentences</label>
+    <select id="cap-s" onchange="saveCap()">
+      <option value="0">Off</option>
+      <option value="1">On</option>
+    </select>
+    <p class="set-sub" style="margin:8px 0 0">The first letter after a full stop, ? or !, at the start of a line, and the word I. Applies as you type.</p>
+  </div>
+  <div class="field">
+    <label>Capitalise names</label>
+    <select id="cap-n" onchange="saveCap()">
+      <option value="0">Off</option>
+      <option value="1">On</option>
+    </select>
+    <p class="set-sub" style="margin:8px 0 0">Common first names, days and months, once you finish the word. It can't tell a name from a word, so everyday words that are also names (will, mark, rose) are left alone. Add your own here, separated by commas:</p>
+    <textarea id="cap-x" rows="2" placeholder="e.g. McLaughlin, Zoltan" autocapitalize="off" autocomplete="off" spellcheck="false" onchange="saveCap()" style="margin-top:8px;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--text);font:inherit;font-size:16px;padding:10px 12px"></textarea>
+  </div>
+  <div class="field">
     <label>Animations</label>
     <select id="anim-on" onchange="saveAnim()">
       <option value="1">On</option>
@@ -1102,6 +1119,96 @@ edEl().addEventListener('input', () => {
   if (k) { pend.node = k.node; pend.off = k.off; } else pend = null;
 });
 for (const ev of ['input', 'keyup', 'touchend', 'click']) edEl().addEventListener(ev, () => setTimeout(paintFmt, 30));
+// ── CAPITALISING AS YOU TYPE (Settings: Capitalise sentences / names; both off by default) ──
+const capS = () => localStorage.getItem('nt_cap_s') === '1';
+const capN = () => localStorage.getItem('nt_cap_n') === '1';
+function saveCap() {
+  localStorage.setItem('nt_cap_s', document.getElementById('cap-s').value);
+  localStorage.setItem('nt_cap_n', document.getElementById('cap-n').value);
+  localStorage.setItem('nt_cap_x', document.getElementById('cap-x').value);
+  applyCap();
+}
+// Common given names (no everyday words: will, mark, rose, grace, bill, art, may ...), days and months. Your own go in Settings.
+const CAP_NAMES = new Set(('james john robert michael william david richard joseph thomas charles chris christopher daniel matthew anthony ' +
+  'donald steven paul andrew joshua kenneth kevin brian george timothy ronald edward jason jeffrey ryan jacob gary nicholas eric jonathan ' +
+  'stephen larry justin scott brandon benjamin samuel gregory alexander patrick dennis jerry tyler aaron jose adam nathan henry douglas ' +
+  'zachary peter kyle ethan walter noah jeremy keith roger terry gerald harold sean austin carl arthur lawrence dylan jesse jordan bryan ' +
+  'billy joe bruce gabriel logan albert willie alan juan wayne elijah randy roy vincent ralph eugene russell bobby mason philip louis ' +
+  'mary patricia jennifer linda elizabeth barbara susan jessica sarah karen lisa nancy betty margaret sandra ashley kimberly emily donna ' +
+  'michelle carol amanda dorothy melissa deborah stephanie rebecca sharon laura cynthia kathleen amy angela shirley anna brenda pamela ' +
+  'emma nicole helen samantha katherine christine debra rachel carolyn janet catherine maria heather diane olivia julie joyce victoria ' +
+  'kelly christina lauren joan evelyn judith megan cheryl andrea hannah jacqueline martha gloria teresa sara janice marie julia kathryn ' +
+  'sophia madison abigail alice denise doris marilyn danielle beverly isabella theresa diana natalie brittany charlotte kayla alexis lori ' +
+  'oliver harry charlie freddie archie alfie oscar leo lucas mohammed sophie poppy isla freya ella amelia evie imogen millie florence ' +
+  'matilda ellie phoebe callum liam ewan fraser hamish angus connor jamie ross craig stuart graham colin neil gavin dominic ian nigel ' +
+  'simon martin trevor clive darren lee monday tuesday wednesday thursday friday saturday sunday january february april june july ' +
+  'august september october november december').split(' '));
+const CAP_I = new Set(["i", "i'm", "i'll", "i've", "i'd"]);
+const CAP_ABBR = new Set(['e.g', 'i.e', 'etc', 'vs', 'mr', 'mrs', 'ms', 'dr', 'prof', 'approx', 'cf', 'no', 'st']);
+function capExtra() {
+  const m = new Map();
+  (localStorage.getItem('nt_cap_x') || '').split(/[,\n]/).forEach(w => { w = w.trim(); if (w) m.set(w.toLowerCase(), w); });
+  return m;
+}
+function applyCap() {   // the keyboard's own sentence capitals follow the setting too
+  edEl().setAttribute('autocapitalize', capS() ? 'sentences' : 'off');
+}
+// The text of the line (block) up to the caret, and where the caret is: { text, node, off } or null
+function lineBeforeCaret() {
+  const s = getSelection();
+  if (!s.rangeCount || !s.isCollapsed || !edEl().contains(s.anchorNode)) return null;
+  let b = s.anchorNode;
+  while (b && b.parentNode !== edEl()) b = b.parentNode;
+  if (!b) return null;
+  if (b.nodeType === 1 && /^(PRE)$/.test(b.nodeName)) return null;
+  const el = s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentNode;
+  if (el.closest && el.closest('pre, code')) return null;
+  const r = document.createRange(); r.setStart(b, 0); r.setEnd(s.anchorNode, s.anchorOffset);
+  return { text: r.toString().replace(/[\u00a0\u200b]/g, ' '), node: s.anchorNode, off: s.anchorOffset };
+}
+// The finished word before the caret, fixed up if it is I, a name, a day or a month in lower case. Returns true if it changed.
+function capWordBeforeCaret() {
+  if (!capS() && !capN()) return false;
+  const c = lineBeforeCaret(); if (!c || c.node.nodeType !== 3) return false;
+  const m = c.text.match(/([A-Za-z][A-Za-z']*)$/); if (!m) return false;
+  const word = m[1], at = m.index;
+  if (word !== word.toLowerCase() || (at > 0 && '/.@:#_-0123456789'.includes(c.text[at - 1]))) return false;
+  const low = /'s$/.test(word) ? word.slice(0, -2) : word;
+  const extra = capExtra();
+  let canon = null;
+  if (capN() && extra.has(low)) canon = extra.get(low);
+  else if ((capS() && CAP_I.has(low)) || (capN() && CAP_NAMES.has(low))) canon = low[0].toUpperCase() + low.slice(1);
+  if (!canon) return false;
+  const fixed = canon + word.slice(low.length);
+  if (fixed === word || c.off < word.length) return false;             // (a word split across two pieces of formatting is left alone)
+  const r = document.createRange(); r.setStart(c.node, c.off - word.length); r.setEnd(c.node, c.off);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+  document.execCommand('insertText', false, fixed);
+  return true;
+}
+edEl().addEventListener('beforeinput', e => {
+  if (e.isComposing || (!capS() && !capN())) return;
+  if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
+    if (capWordBeforeCaret()) { e.preventDefault(); document.execCommand(e.inputType === 'insertParagraph' ? 'insertParagraph' : 'insertLineBreak'); }
+    return;
+  }
+  if (e.inputType !== 'insertText' || !e.data || e.data.length !== 1) return;
+  const ch = e.data;
+  if (/[A-Za-z]/.test(ch)) {
+    if (!capS() || ch !== ch.toLowerCase()) return;
+    const c = lineBeforeCaret(); if (!c) return;
+    let start = c.text === '';
+    if (!start && /[.!?]['")\]]*\s+$/.test(c.text)) {
+      const a = c.text.match(/([A-Za-z.]+?)[.!?]+['")\]]*\s+$/);
+      start = !(a && CAP_ABBR.has(a[1].toLowerCase().replace(/\.$/, '')));
+    }
+    if (start) { e.preventDefault(); document.execCommand('insertText', false, ch.toUpperCase()); }
+  } else if (ch !== "'" && !/[0-9]/.test(ch)) {                       // a delimiter finishes the word before it
+    if (capWordBeforeCaret()) { e.preventDefault(); document.execCommand('insertText', false, ch); }
+  }
+});
+applyCap();
+
 function onKey(e) {
   if (e.key === 'Enter' && closest(/^LI$/)) setTimeout(() => {   // a new checklist item starts unchecked
     const li = closest(/^LI$/);
@@ -1386,6 +1493,9 @@ function openSettings() {
   document.getElementById('bin-count').textContent = bin ? bin + ' note' + (bin === 1 ? '' : 's') : 'Empty';
   document.getElementById('follow-move').value = followMove() ? '1' : '0';
   document.getElementById('anim-on').value = animOn() ? '1' : '0';
+  document.getElementById('cap-s').value = capS() ? '1' : '0';
+  document.getElementById('cap-n').value = capN() ? '1' : '0';
+  document.getElementById('cap-x').value = localStorage.getItem('nt_cap_x') || '';
   showScreen('settings-screen');
 }
 function saveFollow() { localStorage.setItem('nt_follow', document.getElementById('follow-move').value); }
