@@ -722,7 +722,15 @@ function openEditor(id, focus) {
   setText(n.text);
   showScreen('editor-screen');
   paintEditorMeta();
-  if (focus || !n.text) edEl().focus();
+  if (focus || !n.text) { edEl().focus(); caretIntoFirstBlock(); }
+}
+// Focusing can leave the caret on the editor itself, outside any line; text typed there ends up bare and in the wrong place.
+function caretIntoFirstBlock() {
+  const el = edEl(), sel = getSelection();
+  if (sel.rangeCount && el.contains(sel.anchorNode) && sel.anchorNode !== el) return;
+  const first = el.firstElementChild || el;
+  const r = document.createRange(); r.selectNodeContents(first); r.collapse(true);
+  sel.removeAllRanges(); sel.addRange(r);
 }
 function paintEditorMeta() {
   const n = getNote(currentId); if (!n) return;
@@ -981,13 +989,13 @@ function autoFormat() {
   let b = sel.anchorNode;
   while (b && b.parentNode !== edEl()) b = b.parentNode;
   if (!b) return;
+  if (b.nodeType !== 3 && !(b.nodeType === 1 && /^(DIV|P)$/.test(b.nodeName))) return;   // only plain lines (not already a list, heading or quote)
+  const m = b.textContent.replace(/[\u00a0\u200b]/g, ' ').match(MARKER);
+  if (!m) return;                            // (nothing is touched unless a marker was typed: rewrapping text moves the caret)
   if (b.nodeType === 3) {                    // a bare first line: give it a block of its own
     const d = document.createElement('div');
     edEl().replaceChild(d, b); d.appendChild(b); b = d;
   }
-  if (b.nodeType !== 1 || !/^(DIV|P)$/.test(b.nodeName)) return;   // only plain lines (not already a list, heading or quote)
-  const m = b.textContent.replace(/[\u00a0\u200b]/g, ' ').match(MARKER);
-  if (!m) return;
   const mk = m[1];
   b.innerHTML = '<br>';
   const r = document.createRange(); r.setStart(b, 0); r.collapse(true);
