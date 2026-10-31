@@ -1466,6 +1466,21 @@ const trashSync = { ok: true, retryAt: 0 };           // likewise for the `trash
 const noTrash = () => { trashSync.ok = false; trashSync.retryAt = Date.now() + 5 * 60 * 1000; };
 const is4xx = r => r.status >= 400 && r.status < 500;
 
+// Notes changed on another device: redraw, refresh the open note, and leave it if it was deleted or put in the Bin (or
+// taken out of it, while viewing the Bin).
+function afterRemoteChange() {
+  saveState(); renderList();
+  const n = getNote(currentId);
+  if (n && n.text !== getText() && norm(n.text) !== getText() && Date.now() - lastInput > 3000) { setText(n.text); paintEditorMeta(); }
+  if (currentId && (!n || (!!n.trashed !== (view === TRASH)))) {
+    if (n && Date.now() - lastInput < 3000) flushEdit();       // keep what was just typed
+    closeEdMenu(); closeSheet();
+    currentId = null;                                          // (so leaving the editor can't write its text back)
+    showScreen('list-screen');
+    showToast('That note was ' + (n ? (n.trashed ? 'moved to the Bin' : 'restored') : 'deleted') + ' on another device');
+  }
+}
+
 async function syncNow(manual) {
   if (!isConfigured()) { if (manual) showToast('Set a notes code first'); return; }
   if (syncing) { syncAgain = true; return; }
@@ -1496,12 +1511,7 @@ async function syncNow(manual) {
     }
     if (rows.length) localStorage.setItem('nt_since', String(Math.max(0, rows[rows.length - 1].updated - 120)));   // overlap so a skewed clock can't hide an edit
     const changed = mergeRemote(rows) | mergeRemoteFolders(frows);
-    if (changed) {
-      saveState(); renderList();
-      const n = getNote(currentId);
-      if (n && n.text !== getText() && norm(n.text) !== getText() && Date.now() - lastInput > 3000) { setText(n.text); paintEditorMeta(); }
-      if (currentId && !getNote(currentId)) { currentId = null; showScreen('list-screen'); }
-    }
+    if (changed) afterRemoteChange();
     // push (folder tombstones go to the folders table, never the notes table)
     const out = [], fout = [];
     for (const n of notes) if (n.text.trim() && n.updated > (synced[n.id] || 0)) out.push({ id: n.id, text: n.text, pinned: !!n.pinned, updated: n.updated, deleted: false, folder: n.folder || '', trashed: n.trashed || 0 });
