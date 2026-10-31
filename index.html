@@ -419,10 +419,20 @@ const SWIPE_SHORT_PX = 72;
 const swipeLongPx = w => Math.max(190, w * 0.55);
 let swipeEndedAt = 0;
 
-function swipeTier(dx, width) {                     // -> { dir, tier, action }; tier '' = not far enough
+// What a drag of dx means right now:
+//   action = what letting go would run ('none' = nothing)
+//   show   = the action whose panel to display, `armed` = letting go would run it (solid), otherwise a dimmer preview
+// Past the short distance the short action is armed; past the long distance the long one is; and with no long action
+// set, going further keeps the short one armed. When letting go would do nothing yet (e.g. no short action), the panel
+// previews the next action in that direction, so a colour never disappears mid-swipe.
+function swipeState(dx, width) {
   const dir = dx > 0 ? 'right' : 'left', a = Math.abs(dx);
-  const tier = a >= swipeLongPx(width) ? 'Long' : a >= SWIPE_SHORT_PX ? 'Short' : '';
-  return { dir, tier, action: tier ? swipeCfg[dir + tier] : 'none' };
+  const S = swipeCfg[dir + 'Short'], L = swipeCfg[dir + 'Long'];
+  const pastShort = a >= SWIPE_SHORT_PX, pastLong = a >= swipeLongPx(width);
+  const action = pastLong ? (L !== 'none' ? L : S) : pastShort ? S : 'none';
+  const armed = action !== 'none';
+  const show = armed ? action : (S !== 'none' ? S : L);
+  return { dir, action, show, armed };
 }
 
 function pinNote(id) {
@@ -467,15 +477,12 @@ function runSwipeAction(action, id) {
   let sw = null;
   const bgs = el => ({ right: el.querySelector('.swipe-bg.right'), left: el.querySelector('.swipe-bg.left') });
   function paint(dx) {
-    const t = swipeTier(dx, sw.w), b = bgs(sw.el);
+    const t = swipeState(dx, sw.w), b = bgs(sw.el);
     sw.card.style.transform = 'translateX(' + Math.max(-sw.w, Math.min(sw.w, dx)) + 'px)';
     b.right.classList.remove('on'); b.left.classList.remove('on');
     const side = b[t.dir];
-    // before the first threshold, preview the first action that is set for this direction
-    let action = t.action, soft = false;
-    if (!t.tier) { action = swipeCfg[t.dir + 'Short'] !== 'none' ? swipeCfg[t.dir + 'Short'] : swipeCfg[t.dir + 'Long']; soft = true; }
-    side.className = 'swipe-bg ' + t.dir + ' on act-' + action + (soft ? ' soft' : '');
-    side.textContent = action === 'none' ? '' : SWIPE_ACTIONS[action];
+    side.className = 'swipe-bg ' + t.dir + ' on act-' + t.show + (t.armed ? '' : ' soft');
+    side.textContent = t.show === 'none' ? '' : SWIPE_ACTIONS[t.show];
   }
   function finish(cancelled) {
     if (!sw) return;
@@ -483,7 +490,7 @@ function runSwipeAction(action, id) {
     s.el.classList.remove('dragging');
     if (s.locked !== 'x') return;
     swipeEndedAt = Date.now();
-    const t = swipeTier(s.dx, s.w);
+    const t = swipeState(s.dx, s.w);
     const reset = () => { s.card.style.transform = ''; const b = bgs(s.el); b.right.classList.remove('on'); b.left.classList.remove('on'); };
     if (cancelled || t.action === 'none') { reset(); return; }
     if (t.action === 'delete') {            // slide it away, then delete
