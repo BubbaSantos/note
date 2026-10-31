@@ -1145,6 +1145,15 @@ const CAP_NAMES = new Set(('james john robert michael william david richard jose
   'august september october november december').split(' '));
 const CAP_I = new Set(["i", "i'm", "i'll", "i've", "i'd"]);
 const CAP_ABBR = new Set(['e.g', 'i.e', 'etc', 'vs', 'mr', 'mrs', 'ms', 'dr', 'prof', 'approx', 'cf', 'no', 'st']);
+// Mc… / Mac… words: the letter after the prefix is a capital (McGregor, MacLean), except everyday words like machine or macro
+const MAC_WORDS = new Set(('mace machine machines machined machinery machinist machismo macho machete machinations macabre macadam macadamia ' +
+  'macaroni macaroon macaw macchiato mackerel mackintosh macintosh macrame macro macros macron macrons macroeconomic macroeconomics ' +
+  'macrocosm macular macula maccabee').split(' '));
+function macCase(low) {
+  const m = low.match(/^(mc|mac)([a-z]{3,})$/);
+  if (!m || MAC_WORDS.has(low)) return null;
+  return m[1][0].toUpperCase() + m[1].slice(1) + m[2][0].toUpperCase() + m[2].slice(1);
+}
 function capExtra() {
   const m = new Map();
   (localStorage.getItem('nt_cap_x') || '').split(/[,\n]/).forEach(w => { w = w.trim(); if (w) m.set(w.toLowerCase(), w); });
@@ -1176,8 +1185,9 @@ function capWordBeforeCaret() {
   const low = /'s$/.test(word) ? word.slice(0, -2) : word;
   const extra = capExtra();
   let canon = null;
-  if (capN() && extra.has(low)) canon = extra.get(low);
+  if (capN() && extra.has(low)) { canon = extra.get(low); if (canon === low[0].toUpperCase() + low.slice(1)) canon = macCase(low) || canon; }
   else if ((capS() && CAP_I.has(low)) || (capN() && CAP_NAMES.has(low))) canon = low[0].toUpperCase() + low.slice(1);
+  else if (capN()) canon = macCase(low);
   if (!canon) return false;
   const fixed = canon + word.slice(low.length);
   if (fixed === word || c.off < word.length) return false;             // (a word split across two pieces of formatting is left alone)
