@@ -1,5 +1,5 @@
--- Full schema for Note. Safe to run more than once. The part that adds folders is also kept on its own in
--- shell-apps/core/sql/002_folders.sql (run that alone if the notes table already exists).
+-- Full schema for Note. Safe to run more than once. The folders and Trash parts are also kept on their own in
+-- shell-apps/core/sql/002_folders.sql and 003_trash.sql (run those alone if the notes table already exists).
 
 -- Run once in the Supabase SQL editor (project "Apps").
 -- Notes are scoped by note_code, the same idea as QuickSend's send code. Deleting a note
@@ -49,19 +49,6 @@ create policy "public insert folders" on quick_folders for insert with check (tr
 create policy "public update folders" on quick_folders for update using (true);
 create policy "public delete folders" on quick_folders for delete using (true);
 
--- Batch upsert for notes, now carrying the folder. An older client that sends no folder (null) keeps the
--- folder the server already has; '' really means "no folder".
-create or replace function upsert_quick_notes(p_code text, p_notes jsonb)
-returns void language sql as $$
-  insert into quick_notes (note_code, id, text, pinned, updated, deleted, folder)
-  select p_code, n.id, coalesce(n.text, ''), coalesce(n.pinned, false), n.updated, coalesce(n.deleted, false), n.folder
-  from jsonb_to_recordset(p_notes) as n(id text, text text, pinned boolean, updated bigint, deleted boolean, folder text)
-  on conflict (note_code, id) do update
-    set text = excluded.text, pinned = excluded.pinned, updated = excluded.updated, deleted = excluded.deleted,
-        folder = coalesce(excluded.folder, quick_notes.folder)
-    where quick_notes.updated < excluded.updated;
-$$;
-
 create or replace function upsert_quick_folders(p_code text, p_folders jsonb)
 returns void language sql as $$
   insert into quick_folders (note_code, id, name, updated, deleted)
@@ -70,4 +57,22 @@ returns void language sql as $$
   on conflict (note_code, id) do update
     set name = excluded.name, updated = excluded.updated, deleted = excluded.deleted
     where quick_folders.updated < excluded.updated;
+$$;
+
+-- Until this has been run, notes keep syncing as before; a note you delete is simply not marked as trashed on other devices.
+
+-- When a note was moved to the Trash (epoch seconds). 0 = not in the Trash; null = written by an older client that
+-- doesn't know about the Trash (the server then keeps the value it already has).
+alter table quick_notes add column if not exists trashed bigint;
+
+create or replace function upsert_quick_notes(p_code text, p_notes jsonb)
+returns void language sql as $$
+  insert into quick_notes (note_code, id, text, pinned, updated, deleted, folder, trashed)
+  select p_code, n.id, coalesce(n.text, ''), coalesce(n.pinned, false), n.updated, coalesce(n.deleted, false), n.folder, n.trashed
+  from jsonb_to_recordset(p_notes) as n(id text, text text, pinned boolean, updated bigint, deleted boolean, folder text, trashed bigint)
+  on conflict (note_code, id) do update
+    set text = excluded.text, pinned = excluded.pinned, updated = excluded.updated, deleted = excluded.deleted,
+        folder = coalesce(excluded.folder, quick_notes.folder),
+        trashed = coalesce(excluded.trashed, quick_notes.trashed)
+    where quick_notes.updated < excluded.updated;
 $$;

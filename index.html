@@ -67,6 +67,27 @@
     .swipe-bg.act-duplicate { background: #2fa66a; }
     .swipe-bg.act-share { background: #8b5cf6; }
     .swipe-bg.act-none { background: var(--surface2); color: var(--dim); }
+    .swipe-bg.act-restore { background: #2fa66a; } .swipe-bg.act-forever { background: #d64545; }
+    .sheet-row.danger { color: var(--error); }
+    .trash-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--dim); font-size: 14px; margin: 4px 2px 12px; }
+    .trash-note .chip { flex: none; }
+    .set-head { display: flex; align-items: center; justify-content: space-between; }
+    .link-btn { background: none; border: none; color: var(--accent); font-size: 17px; font-weight: 600; padding: 8px 4px; cursor: pointer; }
+    .fold { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+    .fold summary { list-style: none; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; font-weight: 600; cursor: pointer; }
+    .fold summary::-webkit-details-marker { display: none; }
+    .fold summary::after { content: '›'; color: var(--dim); font-size: 22px; transition: transform .15s; margin-left: 10px; }
+    .fold[open] summary::after { transform: rotate(90deg); }
+    .fold .state { margin-left: auto; font-weight: 500; font-size: 14px; color: var(--dim); }
+    .fold .state.ok { color: #6cc070; }
+    .fold-body { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 16px; }
+    .code-row { display: flex; gap: 8px; } .code-row input { flex: 1; min-width: 0; }
+    .mini { flex: none; background: var(--surface2); border: none; border-radius: 12px; color: var(--text); font-size: 15px; font-weight: 600; padding: 0 16px; cursor: pointer; }
+    .drag-ghost { position: fixed; z-index: 70; margin: 0; pointer-events: none; transform: scale(.96) rotate(-1.5deg);
+      box-shadow: 0 16px 34px rgba(0,0,0,.55); opacity: .97; background: var(--surface2); }
+    .swipe.lifted .card { opacity: .25; }
+    body.dragging-note .chip[data-view] { border-style: dashed; border-color: var(--accent); }
+    .chip.drop { background: var(--accent) !important; border-color: var(--accent) !important; color: var(--accent-ink) !important; transform: scale(1.1); }
     .swipe-opts { display: flex; flex-direction: column; gap: 14px; }
     .field select { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text);
       font-size: 16px; padding: 12px 14px; width: 100%; -webkit-appearance: none; appearance: none; }
@@ -248,13 +269,7 @@
 
 <!-- ── SETTINGS ─────────────────────────────────── -->
 <div id="settings-screen" class="screen">
-  <div class="set-title">Note</div>
-  <p class="set-sub">Syncs with the Note app on your desktop.</p>
-  <div class="field">
-    <label>Notes Code</label>
-    <input id="s-code" type="text" placeholder="NOTES_CODE from task-sync.conf"
-           autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
-  </div>
+  <div class="set-head"><div class="set-title">Settings</div><button class="link-btn" id="set-back" onclick="showScreen('list-screen')" style="display:none">Done</button></div>
   <div class="field">
     <label>Toolbar size</label>
     <div class="seg" id="seg-size">
@@ -273,11 +288,30 @@
       <div class="field"><label>Swipe left, long</label><select id="sw-leftLong" onchange="saveSwipe()"></select></div>
     </div>
     <button class="btn ghost" style="margin-top:12px" onclick="resetSwipe()">Reset swipes to default</button>
+    <p class="set-sub" style="margin:10px 0 0">Tip: press and hold a note, then drag it onto a folder at the top to move it.</p>
   </div>
-  <button class="btn" onclick="saveSettings()">Connect</button>
-  <button class="btn ghost" onclick="refreshApp()">Refresh app</button>
-  <p class="set-sub" style="margin-top:0">Loads the latest version. Your notes stay on this phone.</p>
-  <button class="btn ghost" id="set-back" onclick="showScreen('list-screen')" style="display:none">Back</button>
+  <details class="fold" id="sync-details">
+    <summary>Sync<span class="state" id="sync-state"></span></summary>
+    <div class="fold-body">
+      <p class="set-sub" style="margin:0">Notes sync with the Note app on your computer using your notes code.</p>
+      <div class="field">
+        <label>Notes code</label>
+        <div class="code-row">
+          <input id="s-code" type="password" placeholder="Your notes code"
+                 autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+          <button class="mini" id="code-eye" type="button" onclick="toggleCode()">Show</button>
+        </div>
+      </div>
+      <button class="btn" onclick="saveSettings()">Connect</button>
+    </div>
+  </details>
+  <details class="fold">
+    <summary>Advanced</summary>
+    <div class="fold-body">
+      <button class="btn ghost" onclick="refreshApp()">Refresh app</button>
+      <p class="set-sub" style="margin:0">Loads the latest version. Your notes stay on this phone.</p>
+    </div>
+  </details>
 </div>
 
 <script>
@@ -338,10 +372,15 @@ const getNote = id => notes.find(n => n.id === id) || null;
 const getFolder = id => folders.find(f => f.id === id) || null;
 const folderOf = n => (n && n.folder && getFolder(n.folder)) ? n.folder : '';     // a vanished folder shows as "no folder"
 const sortedFolders = () => folders.slice().sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-const notesInView = () => sortedNotes().filter(n => view === '*' || folderOf(n) === view);
+// The Trash: deleting a note sets `trashed` (epoch seconds; 0/absent = not in the Trash). It stays for TRASH_DAYS, then
+// is deleted for good (a tombstone). Trashed notes are hidden everywhere except the Trash view.
+const TRASH = '#trash', TRASH_DAYS = 30;
+const trashedNotes = () => notes.filter(n => n.trashed).sort((a, b) => b.trashed - a.trashed);
+const daysLeft = (n, at = now()) => Math.max(0, Math.ceil((n.trashed + TRASH_DAYS * 86400 - at) / 86400));
+const notesInView = () => view === TRASH ? trashedNotes() : sortedNotes().filter(n => view === '*' || folderOf(n) === view);
 function setView(v, quiet) { view = v; localStorage.setItem('nt_view', v); if (!quiet) renderList(); }
-function validateView() { if (view !== '*' && !getFolder(view)) setView('*', true); }   // All notes is the only built-in view; unfiled notes live in it
-const sortedNotes = () => notes.slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updated - a.updated);
+function validateView() { if (view !== '*' && view !== TRASH && !getFolder(view)) setView('*', true); }   // All notes + Trash are the built-in views; unfiled notes live in All
+const sortedNotes = () => notes.filter(n => !n.trashed).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updated - a.updated);
 
 // ── SCREENS ───────────────────────────────────────────
 function showScreen(id) {
@@ -364,10 +403,11 @@ function setDot(state) { document.getElementById('dot').className = 'dot ' + sta
 
 // ── LIST ──────────────────────────────────────────────
 function renderChips() {
-  const count = id => notes.filter(n => id === '*' || folderOf(n) === id).length;
+  const count = id => notes.filter(n => !n.trashed && (id === '*' || folderOf(n) === id)).length;
   const chip = (id, name, n) => `<button class="chip${view === id ? ' on' : ''}" data-view="${esc(id)}">${esc(name)}<span class="n">${n}</span></button>`;
   let h = chip('*', 'All', count('*'));
   for (const f of sortedFolders()) h += chip(f.id, f.name, count(f.id));
+  h += chip(TRASH, 'Trash', trashedNotes().length);
   h += `<button class="chip ghost" onclick="newFolder()">＋ Folder</button>`;
   if (getFolder(view)) h += `<button class="chip ghost" onclick="renameFolder()">Rename</button><button class="chip ghost danger" onclick="deleteFolder()">Delete</button>`;
   document.getElementById('chips').innerHTML = h;
@@ -387,6 +427,7 @@ function renderList() {
   if (!list.length) {
     el.innerHTML = q
       ? `<div class="empty"><b>No matches</b>Nothing contains “${esc(q)}”.</div>`
+      : view === TRASH ? `<div class="empty"><b>The Trash is empty</b>Deleted notes stay here for ${TRASH_DAYS} days.</div>`
       : view === '*' ? `<div class="empty"><b>No notes yet</b>Tap + to write one.</div>`
       : `<div class="empty"><b>Nothing here yet</b>Tap + to write a note in this folder.</div>`;
     return;
@@ -394,8 +435,12 @@ function renderList() {
   const card = n => `<div class="swipe" data-id="${esc(n.id)}"><div class="swipe-bg right"></div><div class="swipe-bg left"></div><div class="card${n.pinned ? ' pinned' : ''}" data-id="${esc(n.id)}">
       <div class="card-title">${view === '*' && folderOf(n) ? `<span class="card-folder">${esc(getFolder(folderOf(n)).name)}</span>` : ''}${esc(boxes(title(n)))}</div>
       ${preview(n) ? `<div class="card-prev">${esc(preview(n))}</div>` : ''}
-      <div class="card-time">${esc(relTime(n.updated))}</div>
+      <div class="card-time">${esc(view === TRASH ? daysLeft(n) + ' day' + (daysLeft(n) === 1 ? '' : 's') + ' left' : relTime(n.updated))}</div>
     </div></div>`;
+  if (view === TRASH) {
+    el.innerHTML = `<div class="trash-note">Notes in the Trash are deleted for good after ${TRASH_DAYS} days.<button class="chip danger" onclick="emptyTrash()">Empty Trash</button></div>` + list.map(card).join('');
+    return;
+  }
   const pinned = list.filter(n => n.pinned), rest = list.filter(n => !n.pinned);
   el.innerHTML =
     (pinned.length ? `<div class="section">Pinned</div>` + pinned.map(card).join('') : '') +
@@ -404,15 +449,18 @@ function renderList() {
 document.getElementById('list').addEventListener('click', e => {
   if (Date.now() - swipeEndedAt < 400) return;            // the tap that ends a swipe isn't a tap
   const c = e.target.closest('.card');
-  if (c) openEditor(c.dataset.id);
+  if (c) view === TRASH ? openTrashSheet(c.dataset.id) : openEditor(c.dataset.id);
 });
 
 // ── SWIPE GESTURES ────────────────────────────────────
 // Dragging a note sideways reveals an action; letting go past the SHORT or LONG distance runs it. What each of the
 // four (right/left x short/long) does is a setting.
-const SWIPE_ACTIONS = { none: 'Nothing', pin: 'Pin / unpin', delete: 'Delete', move: 'Move to folder',
+const SWIPE_ACTIONS = { none: 'Nothing', pin: 'Pin / unpin', delete: 'Move to Trash', move: 'Move to folder',
   unfile: 'Remove from folder', duplicate: 'Duplicate', share: 'Share' };
 const SWIPE_DEFAULTS = { rightShort: 'pin', rightLong: 'none', leftShort: 'none', leftLong: 'delete' };
+const SWIPE_LABELS = Object.assign({}, SWIPE_ACTIONS, { restore: 'Restore', forever: 'Delete forever' });
+const TRASH_SWIPE = { rightShort: 'restore', rightLong: 'restore', leftShort: 'none', leftLong: 'forever' };    // in the Trash view
+const activeSwipe = () => view === TRASH ? TRASH_SWIPE : swipeCfg;
 let swipeCfg = Object.assign({}, SWIPE_DEFAULTS);
 try { Object.assign(swipeCfg, JSON.parse(localStorage.getItem('nt_swipe') || '{}')); } catch {}
 for (const k in swipeCfg) if (!(swipeCfg[k] in SWIPE_ACTIONS)) swipeCfg[k] = SWIPE_DEFAULTS[k];
@@ -428,7 +476,7 @@ let swipeEndedAt = 0;
 // previews the next action in that direction, so a colour never disappears mid-swipe.
 function swipeState(dx, width) {
   const dir = dx > 0 ? 'right' : 'left', a = Math.abs(dx);
-  const S = swipeCfg[dir + 'Short'], L = swipeCfg[dir + 'Long'];
+  const cfg = activeSwipe(), S = cfg[dir + 'Short'], L = cfg[dir + 'Long'];
   const pastShort = a >= SWIPE_SHORT_PX, pastLong = a >= swipeLongPx(width);
   const action = pastLong ? (L !== 'none' ? L : S) : pastShort ? S : 'none';
   const armed = action !== 'none';
@@ -442,16 +490,36 @@ function pinNote(id) {
   saveState(); renderList(); scheduleSync();
   showToast(n.pinned ? 'Pinned' : 'Unpinned');
 }
-function deleteNote(id) {
+function deleteNote(id) {                           // moves the note to the Trash
+  const n = getNote(id); if (!n || n.trashed) return;
+  n.trashed = now(); n.updated = Math.max(now(), n.updated + 1);        // bumping `updated` makes it win the merge and sync
+  saveState(); renderList(); scheduleSync();
+  showToast('Moved to Trash', () => restoreNote(id));
+}
+function restoreNote(id) {
+  const n = getNote(id); if (!n || !n.trashed) return false;
+  n.trashed = 0; n.updated = Math.max(now(), n.updated + 1);
+  saveState(); renderList(); scheduleSync();
+  return true;
+}
+function deleteForever(id) { removeNote(id); renderList(); }
+function emptyTrash() {
+  const ids = trashedNotes().map(n => n.id);
+  if (!ids.length || !confirm(`Delete ${ids.length} note${ids.length === 1 ? '' : 's'} forever? This can't be undone.`)) return;
+  ids.forEach(id => removeNote(id)); renderList();
+}
+function purgeTrash(at = now()) {                   // 30 days in the Trash: gone for good
+  const old = notes.filter(n => n.trashed && n.trashed <= at - TRASH_DAYS * 86400);
+  old.forEach(n => removeNote(n.id));
+  if (old.length) renderList();
+  return old.length;
+}
+function openTrashSheet(id) {
   const n = getNote(id); if (!n) return;
-  const copy = Object.assign({}, n);
-  removeNote(id);
-  renderList();
-  showToast('Deleted', () => {   // undo: a fresh `updated` beats the tombstone everywhere
-    copy.updated = Math.max(now(), (deleted[copy.id] || 0) + 1);
-    notes.push(copy); delete deleted[copy.id];
-    saveState(); renderList(); scheduleSync();
-  });
+  sheetFor = id;
+  document.getElementById('sheet-card').innerHTML = `<div class="sheet-title">${esc(title(n))} · ${daysLeft(n)} day${daysLeft(n) === 1 ? '' : 's'} left</div>` +
+    `<button class="sheet-row" data-trash="restore">Restore</button><button class="sheet-row danger" data-trash="forever">Delete forever</button>`;
+  document.getElementById('sheet').classList.add('show');
 }
 function duplicateNote(id) {
   const n = getNote(id); if (!n) return;
@@ -471,11 +539,14 @@ function runSwipeAction(action, id) {
   else if (action === 'unfile') { if (moveNote(id, '')) { renderList(); showToast('Removed from folder'); } }
   else if (action === 'duplicate') duplicateNote(id);
   else if (action === 'share') shareNote(id);
+  else if (action === 'restore') { if (restoreNote(id)) showToast('Restored'); }
+  else if (action === 'forever') { if (confirm("Delete this note forever? This can't be undone.")) deleteForever(id); }
 }
 
 (function () {
-  const list = document.getElementById('list');
-  let sw = null;
+  const list = document.getElementById('list'), chips = document.getElementById('chips');
+  let sw = null, drag = null;
+  const LONG_PRESS_MS = 380;
   const bgs = el => ({ right: el.querySelector('.swipe-bg.right'), left: el.querySelector('.swipe-bg.left') });
   function paint(dx) {
     const t = swipeState(dx, sw.w), b = bgs(sw.el);
@@ -483,42 +554,96 @@ function runSwipeAction(action, id) {
     b.right.classList.remove('on'); b.left.classList.remove('on');
     const side = b[t.dir];
     side.className = 'swipe-bg ' + t.dir + ' on act-' + t.show + (t.armed ? '' : ' soft');
-    side.textContent = t.show === 'none' ? '' : SWIPE_ACTIONS[t.show];
+    side.textContent = t.show === 'none' ? '' : SWIPE_LABELS[t.show];
+  }
+  // ── press and hold, then drag onto a chip (All / a folder / Trash) ──
+  const chipAt = (x, y) => { const e = document.elementFromPoint(x, y); return e && e.closest ? e.closest('#chips .chip[data-view]') : null; };
+  function startDrag(x, y) {
+    if (!sw || sw.locked !== null || view === TRASH) return;               // (nothing to drag to from the Trash)
+    sw.locked = 'drag';
+    const r = sw.card.getBoundingClientRect();
+    const ghost = sw.card.cloneNode(true);
+    ghost.className = 'card drag-ghost'; ghost.style.width = Math.min(r.width, 240) + 'px';      // a compact card...
+    document.body.appendChild(ghost);
+    sw.el.classList.add('lifted'); document.body.classList.add('dragging-note');
+    drag = { ghost, ox: 36, oy: -30, x, y, over: null, raf: 0 };                                   // ...riding just BELOW the finger, so the chip you aim at stays visible
+    moveDrag(x, y);
+    if (navigator.vibrate) navigator.vibrate(12);
+    const tick = () => {                                                     // near either end of the chip row: scroll it
+      if (!drag) return;
+      const cr = chips.getBoundingClientRect();
+      if (drag.y > cr.top - 20 && drag.y < cr.bottom + 20) {
+        if (drag.x < cr.left + 44) chips.scrollLeft -= 10; else if (drag.x > cr.right - 44) chips.scrollLeft += 10;
+      }
+      drag.raf = requestAnimationFrame(tick);
+    };
+    drag.raf = requestAnimationFrame(tick);
+  }
+  function moveDrag(x, y) {
+    drag.x = x; drag.y = y;
+    drag.ghost.style.left = (x - drag.ox) + 'px'; drag.ghost.style.top = (y - drag.oy) + 'px';
+    const c = chipAt(x, y);
+    if (c !== drag.over) { if (drag.over) drag.over.classList.remove('drop'); if (c) c.classList.add('drop'); drag.over = c; }
+  }
+  function endDrag(cancelled) {
+    const d = drag; drag = null;
+    cancelAnimationFrame(d.raf);
+    d.ghost.remove(); if (d.over) d.over.classList.remove('drop');
+    sw.el.classList.remove('lifted'); document.body.classList.remove('dragging-note');
+    swipeEndedAt = Date.now();
+    const id = sw.id, target = d.over && d.over.dataset.view;
+    if (cancelled || target === undefined || target === null) return;
+    dropNote(id, target);
   }
   function finish(cancelled) {
     if (!sw) return;
     const s = sw; sw = null;
+    clearTimeout(s.lp);
+    if (s.locked === 'drag') { sw = s; endDrag(cancelled); sw = null; return; }
     s.el.classList.remove('dragging');
     if (s.locked !== 'x') return;
     swipeEndedAt = Date.now();
     const t = swipeState(s.dx, s.w);
     const reset = () => { s.card.style.transform = ''; const b = bgs(s.el); b.right.classList.remove('on'); b.left.classList.remove('on'); };
     if (cancelled || t.action === 'none') { reset(); return; }
-    if (t.action === 'delete') {            // slide it away, then delete
+    if (t.action === 'delete' || t.action === 'restore') {            // slide it away, then do it
       s.card.style.transform = 'translateX(' + (t.dir === 'right' ? s.w : -s.w) + 'px)';
-      setTimeout(() => runSwipeAction('delete', s.id), 180);
+      setTimeout(() => runSwipeAction(t.action, s.id), 180);
     } else { reset(); runSwipeAction(t.action, s.id); }
   }
   list.addEventListener('pointerdown', e => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const el = e.target.closest('.swipe'); if (!el) return;
     sw = { el, card: el.querySelector('.card'), x: e.clientX, y: e.clientY, dx: 0, locked: null, id: el.dataset.id, w: el.offsetWidth || 360, pid: e.pointerId };
+    sw.lp = setTimeout(() => startDrag(sw && sw.x, sw && sw.y), LONG_PRESS_MS);     // held still long enough: pick it up
   });
   list.addEventListener('pointermove', e => {
     if (!sw || e.pointerId !== sw.pid) return;
+    if (sw.locked === 'drag') { moveDrag(e.clientX, e.clientY); return; }
     const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
     if (sw.locked === null) {                // decide once: sideways swipe or ordinary scroll
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      clearTimeout(sw.lp);                   // moved before the press was long enough: not a pick-up
       sw.locked = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
       if (sw.locked === 'x') { sw.el.classList.add('dragging'); try { list.setPointerCapture(e.pointerId); } catch {} }
     }
     if (sw.locked !== 'x') return;
     sw.dx = dx; paint(dx);
   });
+  // while a note is picked up the page must not scroll under the finger
+  list.addEventListener('touchmove', e => { if (drag && e.cancelable) e.preventDefault(); }, { passive: false });
   list.addEventListener('pointerup', e => { if (sw && e.pointerId === sw.pid) finish(false); });
   list.addEventListener('pointercancel', e => { if (sw && e.pointerId === sw.pid) finish(true); });
   list.addEventListener('contextmenu', e => e.preventDefault());    // no callout menu on a long press in the list
 })();
+// A note dropped on a chip: All = out of its folder, a folder = into it, Trash = delete. The view stays put.
+function dropNote(id, target) {
+  const n = getNote(id); if (!n || n.trashed) return;
+  if (target === TRASH) { deleteNote(id); return; }
+  if (target === view && target !== '*') return;                      // dropped back in the folder it is already in (All still means "take it out of its folder")
+  const fid = target === '*' ? '' : target;
+  if (moveNote(id, fid, false)) { renderList(); showToast(fid ? 'Moved to ' + getFolder(fid).name : 'Removed from folder'); }
+}
 // text can only be selected where you edit it (CSS handles most of it; this covers the rest)
 document.addEventListener('selectstart', e => {
   const t = e.target.nodeType === 3 ? e.target.parentElement : e.target;
@@ -543,6 +668,7 @@ initSwipeSettings();
 let editTimer = null, lastInput = 0;
 
 function newNote() {
+  if (view === TRASH) setView('*', true);                 // a new note never goes into the Trash
   const n = { id: 'n-' + Date.now() + '-' + Math.floor(Math.random() * 1e6), text: '', pinned: false, updated: now(), folder: getFolder(view) ? view : '' };
   notes.unshift(n);
   openEditor(n.id, true);
@@ -953,12 +1079,12 @@ function removeFolder(id) {
   if (view === id) setView('*', true);
   saveState(); renderList(); scheduleSync();
 }
-function moveNote(id, folderId) {
+function moveNote(id, folderId, follow = true) {
   const n = getNote(id); if (!n) return false;
   const fid = getFolder(folderId) ? folderId : '';
   if ((n.folder || '') === fid) return false;
   n.folder = fid; n.updated = Math.max(now(), n.updated + 1);     // bumping `updated` is what makes the move sync
-  if (view !== '*' && view !== fid) setView(fid || '*', true);    // follow the note so it stays on screen (out of a folder = All)
+  if (follow && view !== '*' && view !== fid) setView(fid || '*', true);    // follow the note so it stays on screen (out of a folder = All)
   saveState(); scheduleSync();
   return true;
 }
@@ -977,6 +1103,12 @@ function openMoveSheet(id) {
 function closeSheet() { document.getElementById('sheet').classList.remove('show'); }
 document.getElementById('sheet-card').addEventListener('click', e => {
   const b = e.target.closest('.sheet-row'); if (!b) return;
+  if (b.dataset.trash) {
+    closeSheet();
+    if (b.dataset.trash === 'restore') { if (restoreNote(sheetFor)) showToast('Restored'); }
+    else if (confirm("Delete this note forever? This can't be undone.")) deleteForever(sheetFor);
+    return;
+  }
   let fid = b.dataset.fid;
   if (b.dataset.new) { fid = newFolder(true); if (fid === null) return; }
   closeSheet();
@@ -1015,9 +1147,19 @@ setFmtSize(localStorage.getItem('nt_fmt') || 'medium', true);
 
 // ── SETTINGS ──────────────────────────────────────────
 function openSettings() {
-  document.getElementById('s-code').value = cfg.code;
+  const code = document.getElementById('s-code');
+  code.value = cfg.code; code.type = 'password';
+  document.getElementById('code-eye').textContent = 'Show';
   document.getElementById('set-back').style.display = isConfigured() ? '' : 'none';
+  const st = document.getElementById('sync-state');
+  st.textContent = isConfigured() ? 'Connected' : 'Not connected'; st.classList.toggle('ok', isConfigured());
+  document.getElementById('sync-details').open = !isConfigured();      // tucked away once it's set up; open on first run
   showScreen('settings-screen');
+}
+function toggleCode() {
+  const c = document.getElementById('s-code'), show = c.type === 'password';
+  c.type = show ? 'text' : 'password';
+  document.getElementById('code-eye').textContent = show ? 'Hide' : 'Show';
 }
 function saveSettings() {
   const code = document.getElementById('s-code').value.trim();
@@ -1053,10 +1195,12 @@ function mergeRemote(rows) {
       if (!mine) {
         const n = { id: r.id, text: r.text, pinned: r.pinned, updated: r.updated };
         if (r.folder != null) n.folder = r.folder;
+        if (r.trashed != null) n.trashed = r.trashed;
         notes.push(n); changed = true;
       } else if (r.updated > mine.updated) {
         mine.text = r.text; mine.pinned = r.pinned; mine.updated = r.updated;
         if (r.folder != null) mine.folder = r.folder;
+        if (r.trashed != null) mine.trashed = r.trashed;
         changed = true;
       }
     }
@@ -1085,6 +1229,8 @@ function mergeRemoteFolders(rows) {
 // plain notes, keep folders on this phone, and try the folder parts again every few minutes.
 const folderSync = { ok: true, retryAt: 0 };
 const noFolders = () => { folderSync.ok = false; folderSync.retryAt = Date.now() + 5 * 60 * 1000; };
+const trashSync = { ok: true, retryAt: 0 };           // likewise for the `trashed` column (003_trash.sql)
+const noTrash = () => { trashSync.ok = false; trashSync.retryAt = Date.now() + 5 * 60 * 1000; };
 const is4xx = r => r.status >= 400 && r.status < 500;
 
 async function syncNow(manual) {
@@ -1094,11 +1240,16 @@ async function syncNow(manual) {
   try {
     // pull notes (with their folder, unless the server has no folder column yet)
     if (!folderSync.ok && Date.now() >= folderSync.retryAt) folderSync.ok = true;
+    if (!trashSync.ok && Date.now() >= trashSync.retryAt) trashSync.ok = true;
     const code = encodeURIComponent(cfg.code);
     const since = Number(localStorage.getItem('nt_since') || 0);
     const notesUrl = cols => `${cfg.url}/rest/v1/quick_notes?note_code=eq.${code}&updated=gt.${since}&select=${cols}&order=updated.asc`;
-    let res = await fetch(notesUrl('id,text,pinned,updated,deleted' + (folderSync.ok ? ',folder' : '')), { headers: hdrs() });
-    if (!res.ok && is4xx(res) && folderSync.ok) { noFolders(); res = await fetch(notesUrl('id,text,pinned,updated,deleted'), { headers: hdrs() }); }
+    const colsNow = () => 'id,text,pinned,updated,deleted' + (folderSync.ok ? ',folder' : '') + (trashSync.ok ? ',trashed' : '');
+    let res = await fetch(notesUrl(colsNow()), { headers: hdrs() });
+    for (let i = 0; i < 2 && !res.ok && is4xx(res); i++) {    // a missing column: drop `trashed`, then `folder`, one at a time
+      if (trashSync.ok) noTrash(); else if (folderSync.ok) noFolders(); else break;
+      res = await fetch(notesUrl(colsNow()), { headers: hdrs() });
+    }
     if (!res.ok) throw new Error('pull ' + res.status);
     const rows = await res.json();
     let frows = [];
@@ -1120,11 +1271,11 @@ async function syncNow(manual) {
     }
     // push (folder tombstones go to the folders table, never the notes table)
     const out = [], fout = [];
-    for (const n of notes) if (n.text.trim() && n.updated > (synced[n.id] || 0)) out.push({ id: n.id, text: n.text, pinned: !!n.pinned, updated: n.updated, deleted: false, folder: n.folder || '' });
+    for (const n of notes) if (n.text.trim() && n.updated > (synced[n.id] || 0)) out.push({ id: n.id, text: n.text, pinned: !!n.pinned, updated: n.updated, deleted: false, folder: n.folder || '', trashed: n.trashed || 0 });
     for (const f of folders) if (f.updated > (synced[f.id] || 0)) fout.push({ id: f.id, name: f.name, updated: f.updated, deleted: false });
     for (const id in deleted) if (deleted[id] > (synced[id] || 0)) {
       if (id.startsWith('f-')) fout.push({ id, name: '', updated: deleted[id], deleted: true });
-      else out.push({ id, text: '', pinned: false, updated: deleted[id], deleted: true, folder: '' });
+      else out.push({ id, text: '', pinned: false, updated: deleted[id], deleted: true, folder: '', trashed: 0 });
     }
     if (out.length) {
       const p = await fetch(`${cfg.url}/rest/v1/rpc/upsert_quick_notes`, {
@@ -1165,12 +1316,13 @@ async function refreshApp() {
 }
 
 // ── START ─────────────────────────────────────────────
-loadConfig(); loadState();
+loadConfig(); loadState(); purgeTrash();
 renderList();
 if (isConfigured()) { showScreen('list-screen'); syncNow(false); }
 else openSettings();
 setInterval(() => { if (document.visibilityState === 'visible' && isConfigured()) syncNow(false); }, 8000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(false); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { purgeTrash(); syncNow(false); } });
+setInterval(() => purgeTrash(), 60 * 60 * 1000);
 window.addEventListener('online', () => syncNow(false));
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
